@@ -49,6 +49,31 @@ route handler and server action, and session refresh in the proxy. Next.js docs 
 that a matcher change can silently remove proxy coverage, so the proxy is never the
 only gate.
 
+## Model configuration gotchas
+
+All in `src/lib/ai/models.ts`, and all easy to get wrong from memory:
+
+- Structured outputs are `output_config.format`, not the deprecated top-level
+  `output_format`. `effort` rides in the *same* `output_config` object — setting the
+  two in separate spread objects silently drops one.
+- **Sonnet 5 runs adaptive thinking by default** and defaults to `high` effort. Left
+  alone it overshoots the PRD's latency targets and costs more than this app needs,
+  so `EFFORT_FOR_CALL` sets it explicitly. That constant is the main latency and cost
+  lever — raise it if the food is dull, lower it if calls drag.
+- `max_tokens` on Sonnet 5 caps thinking *and* response text together, so it needs
+  headroom well past the visible output or a card truncates mid-step.
+- **Haiku 4.5 rejects `effort` outright** — it is only sent to models where
+  `supportsEffort` is true.
+- Prompt-cache minimums differ per model and are not monotonic: 1024 tokens on
+  Sonnet 5, 4096 on Haiku 4.5. Below the minimum the breakpoint does nothing, with no
+  error — so the flavour call may simply not cache, which is fine.
+- Zod constraints JSON Schema cannot express (`.max(140)` on the pitch) are stripped
+  from what is sent to Claude and enforced locally by the SDK. That is the split the
+  PRD asks for, and it happens for free.
+- Cost must account for cache reads (a tenth of input) and cache writes (a quarter
+  more). `estimateCostUsd` does; a figure using only `input_tokens` would be wrong in
+  both directions.
+
 ## Decisions that deviate from the PRD
 
 - **D1 — no aisle mapping.** FR9.8 is dropped; maintaining the lookup table was more
