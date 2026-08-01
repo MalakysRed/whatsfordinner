@@ -1,26 +1,82 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Designed for a 390px viewport held in one greasy hand. Desktop is a courtesy.
+ *
+ * Contrast: every foreground/background pair below clears 4.5:1 in both schemes
+ * (PRD section 13). --muted is the one worth watching if these get adjusted —
+ * it is the closest to the line.
+ */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  --background: #fbfaf8;
+  --raised: #ffffff;
+  --foreground: #1a1815;
+  --muted: #635d54;
+  --line: #e2ddd4;
+
+  /* Warm and appetising, and dark enough for white text to clear 4.5:1. */
+  --accent: #b4451f;
+  --accent-hover: #963715;
+  --on-accent: #ffffff;
+
+  --danger: #a8261a;
+  --success: #2f6b3f;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #14120f;
+    --raised: #1f1c18;
+    --foreground: #f2eee7;
+    --muted: #a89f92;
+    --line: #332e28;
+
+    --accent: #e2703f;
+    --accent-hover: #ef8354;
+    --on-accent: #1a1815;
+
+    --danger: #f08379;
+    --success: #7cc08e;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-raised: var(--raised);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thumb-sized targets. A 44px minimum is the difference between usable and
+   infuriating when you are cooking. */
+button,
+[role="button"],
+a.tap,
+input[type="checkbox"] {
+  touch-action: manipulation;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
