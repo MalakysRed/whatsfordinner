@@ -3,7 +3,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
-import { getServerEnv } from "@/lib/env";
+import { getAnthropicKey } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { GenerationType, MealType } from "@/lib/db/types";
 import {
@@ -21,7 +21,7 @@ let cached: Anthropic | null = null;
 
 function anthropic(): Anthropic {
   if (!cached) {
-    cached = new Anthropic({ apiKey: getServerEnv().anthropicApiKey });
+    cached = new Anthropic({ apiKey: getAnthropicKey() });
   }
   return cached;
 }

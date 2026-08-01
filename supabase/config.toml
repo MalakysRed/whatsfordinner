@@ -68,7 +68,11 @@ schema_paths = []
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-sql_paths = ["./seed.sql"]
+# No seed file: the starter ingredient catalogue ships as a migration, and the
+# signup allowlist is seeded by `pnpm setup:allowlist` because it needs an env
+# var a migration cannot read. Pointing this at a file that does not exist makes
+# `supabase db reset` fail.
+sql_paths = []
 
 [db.network_restrictions]
 # Enable management of network restrictions.
@@ -160,7 +164,17 @@ site_url = "http://127.0.0.1:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# The magic link lands on /auth/confirm, which reads token_hash from the query
+# string — so the confirm path has to be allowed, and with a wildcard because
+# the login form appends ?next= when you were headed somewhere specific.
+# These apply to the local stack only; the hosted project's own Auth → URL
+# Configuration is what counts in production, and nothing here pushes to it.
+additional_redirect_urls = [
+  "http://localhost:3000/auth/confirm",
+  "http://localhost:3000/auth/confirm?next=*",
+  "http://127.0.0.1:3000/auth/confirm",
+  "http://127.0.0.1:3000/auth/confirm?next=*",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.

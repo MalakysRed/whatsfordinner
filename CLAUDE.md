@@ -79,10 +79,16 @@ All in `src/lib/ai/models.ts`, and all easy to get wrong from memory:
 - **D1 — no aisle mapping.** FR9.8 is dropped; maintaining the lookup table was more
   admin than it was worth. The shopping list and the Cowork export group by
   ingredient `category`, which already exists on every ingredient.
-- **D2 — signup allowlist is a table, not an env var.** `BOOTSTRAP_SIGNUP_EMAILS`
-  seeds it once; after that adding a member needs no redeploy.
-- **D3 — the ~150-ingredient starter set** is drafted in
-  `supabase/migrations/0003_seed_ingredients.sql`, intended to be edited by hand.
+- **D2 — signup allowlist is a table, not an env var.** After the first account,
+  adding a member needs no redeploy. Nothing seeds the table automatically: a
+  migration cannot read an env var, so `pnpm setup:allowlist` copies
+  `BOOTSTRAP_SIGNUP_EMAILS` in. **Skip it on a fresh project and nobody can sign
+  up at all** — signup is refused for any address that is neither allowlisted nor
+  invited, and invites can only be issued by an existing owner. The login form
+  fails closed and looks identical to a working one, so there is nothing to see.
+- **D3 — the ~150-ingredient starter set** is a global catalogue in
+  `supabase/migrations/20260801120400_starter_ingredients.sql`, intended to be
+  edited by hand. Households copy from it rather than owning a duplicate each.
 - **D4 — no hosted Supabase or Vercel project yet.** Migrations are written to be
   applied to a hosted project later; local verification runs against a plain
   Postgres cluster.
@@ -90,12 +96,21 @@ All in `src/lib/ai/models.ts`, and all easy to get wrong from memory:
 ## Commands
 
 ```
-pnpm dev            # dev server
-pnpm test           # vitest, pure logic
-pnpm build          # production build
-pnpm typecheck      # tsc --noEmit
-pnpm db:verify      # apply migrations to a throwaway local Postgres cluster
+pnpm dev              # dev server
+pnpm test             # vitest, pure logic
+pnpm build            # production build
+pnpm typecheck        # tsc --noEmit
+pnpm db:verify        # apply migrations to a throwaway local Postgres cluster
+pnpm setup:allowlist  # seed signup_allowlist from BOOTSTRAP_SIGNUP_EMAILS
 ```
+
+First run against a hosted project: `supabase link --project-ref <ref>`,
+`supabase db push`, `pnpm setup:allowlist`. Then in the dashboard set Auth → URL
+Configuration (Site URL plus `/auth/confirm` and `/auth/confirm?next=*` as
+redirect URLs) and override the magic-link email template to
+`{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` — the stock
+template uses a flow `/auth/confirm` does not implement, and every link will
+bounce to `/login?error=link_invalid` until it is changed.
 
 ## Conventions
 

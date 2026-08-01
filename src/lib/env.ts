@@ -25,32 +25,43 @@ export function getPublicEnv() {
   return parsed.data;
 }
 
-const serverSchema = z.object({
-  anthropicApiKey: z.string().min(1),
-  supabaseServiceRoleKey: z.string().min(1),
-});
-
 /**
- * Server-only secrets. Read lazily rather than at module load so that a missing
- * ANTHROPIC_API_KEY breaks generation with a clear message instead of breaking
- * the whole app at boot — the ingredient bank and recipe book still work without
- * it.
+ * Server-only secrets, read one at a time and lazily.
+ *
+ * Deliberately two functions rather than one validated object. Validating them
+ * together meant the admin client — which the login action uses to check the
+ * allowlist — pulled in the Anthropic key, so a project with Supabase configured
+ * but no Anthropic key could not sign in at all, and reported the failure as a
+ * Supabase misconfiguration. Generation is the only thing that should break
+ * without an Anthropic key; the bank, the book and signing in are unaffected.
  */
-export function getServerEnv() {
-  const parsed = serverSchema.safeParse({
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-  });
-
-  if (!parsed.success) {
-    const missing = parsed.error.issues.map((i) => i.path.join(".")).join(", ");
-    throw new Error(`Missing server environment configuration: ${missing}`);
+function required(name: string, value: string | undefined): string {
+  if (!value) {
+    throw new Error(
+      `Missing ${name}. Set it in .env.local — see .env.example.`,
+    );
   }
-
-  return parsed.data;
+  return value;
 }
 
-/** Emails seeded into signup_allowlist on first run (decision D2). */
+export function getAnthropicKey(): string {
+  return required("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY);
+}
+
+export function getSupabaseServiceRoleKey(): string {
+  return required(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+  );
+}
+
+/**
+ * Emails allowed to create the first account (decision D2).
+ *
+ * Consumed by `scripts/seed-allowlist.mjs`, not by the app: the allowlist lives
+ * in the database, and this env var only seeds it once so that somebody can get
+ * in and start issuing invites.
+ */
 export function getBootstrapSignupEmails(): string[] {
   return (process.env.BOOTSTRAP_SIGNUP_EMAILS ?? "")
     .split(",")
