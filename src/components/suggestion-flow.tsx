@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Pill } from "@/components/ui";
 import { RecipeCard } from "@/components/recipe-card";
 import { formatMinutes } from "@/lib/recipe/render";
+import type { UnitPrefs } from "@/lib/recipe/scale";
 import type { Recipe } from "@/lib/schemas/recipe";
 import type { Suggestion } from "@/lib/schemas/suggestion";
 
 export interface Constraints {
   needs_using_up?: string | null;
   cuisine?: string | null;
+  taste_profile?: string[] | null;
   protein?: string | null;
   fat?: string | null;
   carb?: string | null;
@@ -33,10 +35,12 @@ export function SuggestionFlow({
   constraints,
   autoStart = false,
   defaultServings,
+  unitPrefs,
 }: {
   constraints: Constraints;
   autoStart?: boolean;
   defaultServings: number;
+  unitPrefs?: UnitPrefs;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -46,6 +50,7 @@ export function SuggestionFlow({
   } | null>(null);
   const [chosen, setChosen] = useState<Suggestion | null>(null);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [generationId, setGenerationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [feedback, setFeedback] = useState("");
@@ -132,6 +137,7 @@ export function SuggestionFlow({
         }
 
         setRecipe(body.recipe);
+        setGenerationId(body.generation_id ?? null);
         setPhase("recipe");
       } catch {
         setError("Could not reach the app. Check your connection.");
@@ -182,7 +188,7 @@ export function SuggestionFlow({
         >
           Back to the other two
         </button>
-        <RecipeCard recipe={recipe} />
+        <RecipeCard recipe={recipe} suggestion={chosen} unitPrefs={unitPrefs} />
       </div>
     );
   }

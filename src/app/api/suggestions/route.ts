@@ -7,6 +7,7 @@ import { planSuggestionSlots } from "@/lib/generation/quota";
 const bodySchema = z.object({
   needs_using_up: z.string().max(500).nullish(),
   cuisine: z.string().max(80).nullish(),
+  taste_profile: z.array(z.string().max(40)).max(8).nullish(),
   protein: z.string().max(80).nullish(),
   fat: z.string().max(80).nullish(),
   carb: z.string().max(80).nullish(),
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
     const result = await generateSuggestions(caller, {
       needsUsingUp: body.needs_using_up,
       cuisine: body.cuisine,
+      tasteProfile: body.taste_profile,
       protein: body.protein,
       fat: body.fat,
       carb: body.carb,

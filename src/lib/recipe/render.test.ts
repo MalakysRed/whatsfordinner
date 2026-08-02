@@ -43,10 +43,13 @@ describe("formatQuantity", () => {
     ).toBe("flaky sea salt");
   });
 
-  it("trims floating point noise", () => {
+  // formatQuantity delegates its amount+unit text to roundForDisplay (FR5.5,
+  // see scale.test.ts) — ml rounds to the nearest whole millilitre rather than
+  // preserving float noise.
+  it("rounds sensibly rather than trimming float noise", () => {
     expect(
       formatQuantity(ingredient({ item: "oil", amount: 13.333333, unit: "ml" })),
-    ).toBe("13.33ml oil");
+    ).toBe("13ml oil");
   });
 });
 

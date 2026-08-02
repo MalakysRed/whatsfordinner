@@ -1,7 +1,10 @@
 import { requireHouseholdSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { SettingsRow } from "@/lib/db/types";
-import { Builder } from "./builder";
+import type { UnitPrefs } from "@/lib/recipe/scale";
+import { Builder, type BankIngredient } from "./builder";
+
+type BuildSettings = Pick<SettingsRow, "meal_defaults"> & UnitPrefs;
 
 /**
  * "Use it up" is not a separate screen (PRD 7.3). It deep-links here with the
@@ -21,14 +24,17 @@ export default async function BuildPage({
   const [{ data: settings }, { data: ingredients }] = await Promise.all([
     supabase
       .from("settings")
-      .select("meal_defaults")
+      .select("meal_defaults, units_weight, units_volume, units_temp, units_length, show_gas_mark")
       .eq("household_id", session.householdId)
       .single(),
-    supabase.from("ingredients").select("name").eq("household_id", session.householdId),
+    supabase
+      .from("ingredients")
+      .select("id, name, category, disliked, allergen")
+      .eq("household_id", session.householdId),
   ]);
 
-  const defaults = (settings as Pick<SettingsRow, "meal_defaults"> | null)
-    ?.meal_defaults?.dinner;
+  const typedSettings = settings as BuildSettings | null;
+  const defaults = typedSettings?.meal_defaults?.dinner;
 
   return (
     <div className="space-y-5">
@@ -39,10 +45,11 @@ export default async function BuildPage({
       </p>
 
       <Builder
-        bankNames={((ingredients ?? []) as { name: string }[]).map((i) => i.name)}
+        bankIngredients={(ingredients ?? []) as BankIngredient[]}
         defaultServings={defaults?.default_servings ?? 2}
         defaultTimeLimit={defaults?.default_time_limit ?? null}
         focusUseItUp={useItUp === "1"}
+        unitPrefs={typedSettings ?? undefined}
       />
     </div>
   );

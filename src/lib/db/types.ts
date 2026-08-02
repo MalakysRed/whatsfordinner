@@ -30,7 +30,7 @@ export type SpiceTolerance = "mild" | "medium" | "hot" | "very_hot";
 
 export type RecencyWeighting = "never" | "a_bit" | "sometimes" | "mostly" | "always";
 
-export type GenerationType = "flavour" | "suggestions" | "recipe";
+export type GenerationType = "flavour" | "suggestions" | "recipe" | "plate";
 
 export type ListStatus = "active" | "archived";
 

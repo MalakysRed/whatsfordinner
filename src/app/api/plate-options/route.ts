@@ -1,13 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { generateFlavours } from "@/lib/ai/generate";
+import { generatePlateOptions } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
 
 const bodySchema = z.object({
-  cuisine: z.string().max(80).nullish(),
+  protein: z.string().max(80).nullish(),
   taste_profile: z.array(z.string().max(40)).max(8).nullish(),
-  /** Whatever of the plate has been chosen so far. */
-  components: z.array(z.string().max(80)).max(10).default([]),
+  cuisine: z.string().max(80).nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -22,14 +21,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { flavours, generationId } = await generateFlavours(caller, {
-      cuisine: parsed.data.cuisine,
+    const { carbs, fats, veg, generationId } = await generatePlateOptions(caller, {
+      protein: parsed.data.protein,
       tasteProfile: parsed.data.taste_profile,
-      components: parsed.data.components,
+      cuisine: parsed.data.cuisine,
     });
 
     return NextResponse.json({
-      flavours,
+      carbs,
+      fats,
+      veg,
       generation_id: generationId,
       remaining_today: caller.remaining - 1,
     });

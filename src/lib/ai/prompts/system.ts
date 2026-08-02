@@ -177,6 +177,8 @@ export interface BuilderConstraints {
   /** Free text naming what must be used up (FR11). */
   needsUsingUp?: string | null;
   cuisine?: string | null;
+  /** Multi-select: sweet, salty, sour, bitter, umami, spicy, plus free text. */
+  tasteProfile?: string[] | null;
   protein?: string | null;
   fat?: string | null;
   carb?: string | null;
@@ -219,6 +221,10 @@ export function buildRequestBlock(constraints: BuilderConstraints): string {
   if (frame.length > 0) parts.push(`PLATE:\n${frame.join("\n")}`);
 
   if (constraints.cuisine) parts.push(`CUISINE: ${constraints.cuisine}`);
+
+  if (constraints.tasteProfile?.length) {
+    parts.push(`TASTE PROFILE: ${constraints.tasteProfile.join(", ")}`);
+  }
 
   if (constraints.flavourLayers?.length) {
     parts.push(`FLAVOUR LAYER: ${constraints.flavourLayers.join(" and ")}`);

@@ -3,18 +3,20 @@ import {
   type Recipe,
   type RecipeIngredient,
 } from "@/lib/schemas/recipe";
+import { roundForDisplay } from "./scale";
 
 /**
  * Substituting {ing_N} placeholders into step text.
  *
  * This is the client half of the contract the recipe schema sets up: steps carry
  * references, never numbers, and the amount is resolved at render time. That is
- * what will let the servings stepper rescale a whole recipe without another API
+ * what lets the servings stepper rescale a whole recipe without another API
  * call, and what keeps the ingredient list and the directions from disagreeing.
  *
- * Scaling and unit conversion are not here yet — they slot in by passing an
- * already-scaled ingredient list to `renderStepText`, which is why this takes
- * ingredients rather than reading them off the recipe.
+ * Scaling and unit conversion happen before this file ever sees the ingredient
+ * list — the caller passes an already-scaled, already-unit-converted list (see
+ * `scale.ts`), which is why every function here takes ingredients as a
+ * parameter rather than reading them off `recipe` directly.
  */
 
 /**
@@ -22,27 +24,15 @@ import {
  *
  * Deliberately terse: the step says "add {ing_1}", and reading "add 400g
  * chicken thighs" is the point. Amountless ingredients ("salt, to taste") render
- * as just the item.
+ * as just the item. The amount+unit text itself is `roundForDisplay`'s job —
+ * this function only adds the item name on top.
  */
 export function formatQuantity(ingredient: RecipeIngredient): string {
   const { amount, unit, item } = ingredient;
 
   if (amount === null) return item;
 
-  const rounded = formatAmount(amount);
-
-  // Count words ("clove", "each") read as "2 cloves garlic", not "2 clove garlic".
-  if (!unit) return `${rounded} ${item}`;
-  if (unit === "each") return `${rounded} ${item}`;
-
-  const spaced = /^(g|kg|ml|l)$/i.test(unit) ? "" : " ";
-  return `${rounded}${spaced}${unit} ${item}`;
-}
-
-/** Trims float noise without pretending to the rounding rules that come later. */
-export function formatAmount(amount: number): string {
-  if (Number.isInteger(amount)) return String(amount);
-  return String(Math.round(amount * 100) / 100);
+  return `${roundForDisplay(amount, unit)} ${item}`;
 }
 
 /**

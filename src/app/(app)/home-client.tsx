@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { SuggestionFlow } from "@/components/suggestion-flow";
+import type { UnitPrefs } from "@/lib/recipe/scale";
 
 /**
  * The home screen.
@@ -12,7 +13,13 @@ import { SuggestionFlow } from "@/components/suggestion-flow";
  * the whole reason the app exists, and anything added in front of it is a
  * regression however good it looks.
  */
-export function HomeClient({ defaultServings }: { defaultServings: number }) {
+export function HomeClient({
+  defaultServings,
+  unitPrefs,
+}: {
+  defaultServings: number;
+  unitPrefs?: UnitPrefs;
+}) {
   const [surprising, setSurprising] = useState(false);
 
   if (surprising) {
@@ -25,7 +32,12 @@ export function HomeClient({ defaultServings }: { defaultServings: number }) {
         >
           Start over
         </button>
-        <SuggestionFlow constraints={{}} autoStart defaultServings={defaultServings} />
+        <SuggestionFlow
+          constraints={{}}
+          autoStart
+          defaultServings={defaultServings}
+          unitPrefs={unitPrefs}
+        />
       </div>
     );
   }

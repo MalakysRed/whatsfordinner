@@ -67,6 +67,27 @@ export const flavoursResponseSchema = z.object({
 export type FlavourOption = z.infer<typeof flavourOptionSchema>;
 
 /**
+ * A single option offered for one part of "the plate" (PRD 7.2's builder).
+ * `in_bank` is model-reported, the same trust boundary as a recipe
+ * ingredient's `in_bank` — the household bank handed to the model already
+ * excludes disliked and allergen items, so a truthful model naturally will
+ * not offer them back.
+ */
+export const plateOptionSchema = z.object({
+  name: z.string(),
+  in_bank: z.boolean(),
+});
+
+export const plateOptionsResponseSchema = z.object({
+  carbs: z.array(plateOptionSchema),
+  fats: z.array(plateOptionSchema),
+  veg: z.array(plateOptionSchema),
+});
+
+export type PlateOption = z.infer<typeof plateOptionSchema>;
+export type PlateOptionsResponse = z.infer<typeof plateOptionsResponseSchema>;
+
+/**
  * A suggestion needs nothing beyond what was named and what is already in the
  * cupboard. Badged "nothing to buy" and sorted first (FR11.3).
  */

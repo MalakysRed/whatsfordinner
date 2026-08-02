@@ -7,6 +7,7 @@ import {
 } from "@/lib/schemas/recipe";
 import {
   flavoursResponseSchema,
+  plateOptionsResponseSchema,
   suggestionsResponseSchema,
   needsNothingExtra,
   type Suggestion,
@@ -31,12 +32,19 @@ interface Caller {
 /** Six to eight flavour layers for the builder (PRD 7.2.5). */
 export async function generateFlavours(
   caller: Caller,
-  input: { cuisine?: string | null; components: string[] },
+  input: {
+    cuisine?: string | null;
+    tasteProfile?: string[] | null;
+    components: string[];
+  },
 ) {
   const described = input.components.filter(Boolean).join(", ");
 
   const requestBlock = [
     input.cuisine ? `CUISINE: ${input.cuisine}` : null,
+    input.tasteProfile?.length
+      ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
+      : null,
     described ? `CHOSEN SO FAR: ${described}` : null,
     "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" Favour ones the household could actually make from their bank.",
   ]
@@ -51,6 +59,48 @@ export async function generateFlavours(
   });
 
   return { flavours: data.flavours, generationId };
+}
+
+/**
+ * Options for the rest of the plate — a complex carb, a healthy fat, and
+ * vegetables or fruit — offered before the flavour layer step (PRD 7.2's
+ * builder redesign). Bank-first: the household block already excludes
+ * disliked and allergen ingredients, so a truthful model naturally leaves them
+ * out, but it may still suggest something outside the bank when nothing in it
+ * fits — flagged honestly via in_bank rather than pretended into the bank.
+ */
+export async function generatePlateOptions(
+  caller: Caller,
+  input: {
+    protein?: string | null;
+    tasteProfile?: string[] | null;
+    cuisine?: string | null;
+  },
+) {
+  const requestBlock = [
+    input.protein ? `PROTEIN: ${input.protein}` : null,
+    input.tasteProfile?.length
+      ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
+      : null,
+    input.cuisine ? `CUISINE: ${input.cuisine}` : null,
+    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and six to eight for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const { data, generationId } = await runGeneration({
+    ...caller,
+    type: "plate",
+    requestBlock,
+    schema: plateOptionsResponseSchema,
+  });
+
+  return {
+    carbs: data.carbs,
+    fats: data.fats,
+    veg: data.veg,
+    generationId,
+  };
 }
 
 /**

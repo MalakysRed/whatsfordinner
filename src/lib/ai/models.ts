@@ -67,6 +67,7 @@ export type ModelKey = keyof typeof MODELS;
  */
 export const MODEL_FOR_CALL: Record<GenerationType, ModelKey> = {
   flavour: "haiku",
+  plate: "haiku",
   suggestions: "sonnet",
   recipe: "sonnet",
 };
@@ -83,6 +84,7 @@ export const MODEL_FOR_CALL: Record<GenerationType, ModelKey> = {
  */
 export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> = {
   flavour: "low",
+  plate: "low",
   suggestions: "medium",
   recipe: "medium",
 };
@@ -94,6 +96,7 @@ export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> 
  */
 export const MAX_TOKENS_FOR_CALL: Record<GenerationType, number> = {
   flavour: 4_000,
+  plate: 4_000,
   suggestions: 12_000,
   recipe: 20_000,
 };
