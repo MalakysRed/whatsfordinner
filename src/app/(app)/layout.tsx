@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { requireHouseholdSession } from "@/lib/auth/session";
+import { OfflineBanner } from "@/components/offline-banner";
 
 /**
  * Shell for the signed-in app. Navigation sits at the bottom because this is
@@ -13,6 +14,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh flex-col">
+      <OfflineBanner />
       <div className="mx-auto w-full max-w-md flex-1 px-5 pb-28 pt-6">{children}</div>
 
       <nav className="fixed inset-x-0 bottom-0 border-t border-line bg-raised/95 backdrop-blur">

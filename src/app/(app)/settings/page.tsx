@@ -2,6 +2,7 @@ import { requireHouseholdSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, Label, Input, Pill, Section, Select, Textarea } from "@/components/ui";
 import { SaveForm } from "@/components/save-form";
+import { InstallPrompt } from "@/components/install-prompt";
 import { SPICE_LABELS } from "@/lib/schemas/settings";
 import type {
   DietaryRuleRow,
@@ -65,6 +66,8 @@ export default async function SettingsPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
       </header>
+
+      <InstallPrompt />
 
       {/* FR2.3 */}
       <Section

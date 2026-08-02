@@ -63,8 +63,11 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Everything except static assets and image optimisation. Without this the
-    // redirect above would also catch CSS and JS.
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Everything except static assets, image optimisation, and the PWA shell
+    // (sw.js, the offline fallback). Without this the redirect above would
+    // also catch CSS and JS — and would redirect the service worker itself
+    // and the page it falls back to when offline, which must both be
+    // reachable signed out.
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw\\.js|offline|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
