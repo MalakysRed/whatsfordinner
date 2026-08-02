@@ -10,7 +10,12 @@
 -- Closed signup
 -- ---------------------------------------------------------------------------
 
-create or replace function auth.enforce_signup_allowlist()
+-- Lives in public, not auth: hosted Supabase does not grant CREATE on the auth
+-- schema itself, even though a trigger *attached to* auth.users calling a
+-- function that lives elsewhere is the normal, supported pattern (the profile
+-- mirror trigger below does exactly that). Only the function's home schema
+-- changed here — the trigger still fires before every insert into auth.users.
+create or replace function public.enforce_signup_allowlist()
 returns trigger
 language plpgsql
 security definer
@@ -43,7 +48,7 @@ drop trigger if exists enforce_signup_allowlist on auth.users;
 
 create trigger enforce_signup_allowlist
   before insert on auth.users
-  for each row execute function auth.enforce_signup_allowlist();
+  for each row execute function public.enforce_signup_allowlist();
 
 -- ---------------------------------------------------------------------------
 -- Profile mirroring
