@@ -26,12 +26,8 @@ export const suggestionSchema = z.object({
   components: suggestionComponentsSchema,
   flavour_layer: z.string().nullable(),
   total_minutes: z.number().int(),
-  active_minutes: z.number().int(),
   difficulty: difficultySchema,
-  equipment: z.array(z.string()),
   ingredients_not_in_bank: z.array(z.string()),
-  /** Ties the suggestion back to their bank or their feedback. */
-  why_this: z.string(),
   /**
    * Which of the "needs using up" ingredients this dish actually uses (FR11.3).
    * Empty when nothing was named.

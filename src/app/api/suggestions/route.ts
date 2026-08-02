@@ -67,11 +67,8 @@ function suggestionFromRecipe(id: string, recipe: Recipe): SuggestionWithBook {
     },
     flavour_layer: flavourLayerItems.length ? flavourLayerItems.join(" + ") : null,
     total_minutes: recipe.total_minutes,
-    active_minutes: recipe.active_minutes,
     difficulty: recipe.difficulty,
-    equipment: recipe.equipment,
     ingredients_not_in_bank: recipe.ingredients.filter((i) => !i.in_bank).map((i) => i.item),
-    why_this: "From your book — cooked recently, worth another go.",
     uses_named_ingredients: [],
     from_book: { recipe_id: id, payload: recipe },
   };

@@ -22,10 +22,8 @@ export default async function IngredientsPage() {
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Ingredient bank</h1>
         <p className="text-sm leading-relaxed text-muted">
-          A preference pantry, not an inventory: what you love, dislike, or
-          need to avoid shapes suggestions without limiting them to what&rsquo;s
-          already in the cupboard — anything not already here is flagged when
-          you generate a recipe or add it to the shopping list.
+          What you actually like. Suggestions lean on this list but will reach
+          outside it when a dish needs to — anything new is flagged on the card.
         </p>
       </header>
 

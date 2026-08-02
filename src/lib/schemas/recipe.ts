@@ -55,7 +55,6 @@ export const recipeStepSchema = z.object({
   text: z.string(),
   duration_seconds: z.number().int().nullable(),
   temperature_c: z.number().nullable(),
-  equipment: z.array(z.string()),
 });
 
 export const recipeSchema = z.object({

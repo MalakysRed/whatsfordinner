@@ -47,7 +47,7 @@ export async function generateFlavours(
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     described ? `CHOSEN SO FAR: ${described}` : null,
-    "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" Favour combinations built from real, ordinary ingredients over anything obscure.",
+    "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" Favour ones the household could actually make from their bank.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -65,10 +65,13 @@ export async function generateFlavours(
 /**
  * Options for the rest of the plate — a complex carb, a healthy fat, and
  * vegetables or fruit — offered before the flavour layer step (PRD 7.2's
- * builder redesign). The model does not see the bank (see prompts/system.ts),
- * so it cannot say honestly which options the household already has —
- * `in_bank` on the response is discarded and recomputed here against the
- * real bank instead, the same trust boundary as the allergen guardrail.
+ * builder redesign). Bank-first: the household block already excludes
+ * disliked and allergen ingredients, so a truthful model naturally leaves
+ * them out, but it may still suggest something outside the bank when nothing
+ * in it fits. `in_bank` is still recomputed here against the real bank
+ * rather than trusted outright — the same belt-and-suspenders move as the
+ * allergen guardrail, since even a model that can see the list can still get
+ * one entry wrong.
  */
 export async function generatePlateOptions(
   caller: Caller,
@@ -84,7 +87,7 @@ export async function generatePlateOptions(
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     input.cuisine ? `CUISINE: ${input.cuisine}` : null,
-    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Ordinary, real ingredients from a normal supermarket — do not worry about what the household already has, the app works that out separately.",
+    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -158,10 +161,11 @@ export async function generateSuggestions(
     },
   });
 
-  // The model does not see the bank (see prompts/system.ts), so it cannot say
-  // honestly what still needs buying — recompute ingredients_not_in_bank
-  // against the real bank rather than trust whatever it returned, the same
-  // trust boundary as the allergen guardrail.
+  // Recomputed against the real bank rather than trusted outright — the same
+  // belt-and-suspenders move as the allergen guardrail. (Deferred: dropping
+  // ingredients_not_in_bank from what Claude is asked to produce entirely,
+  // since this always overwrites it anyway, is an optional follow-up to test
+  // locally after deployment rather than land sight-unseen.)
   const withRealBank = data.suggestions.map((suggestion) => ({
     ...suggestion,
     ingredients_not_in_bank: namesNotInBank(namedComponents(suggestion.components), caller.context.ingredients),
@@ -216,15 +220,24 @@ Write it for ${servings} ${servings === 1 ? "person" : "people"} and set base_se
 
     `Every quantity mentioned in a step must be written as a placeholder referencing the ingredient's id — {ing_1}, {ing_2} and so on — never as a literal amount. The app substitutes the scaled amount when it renders, so "Toss {ing_1} with {ing_4} and leave for 15 minutes" is right and "Toss 400g chicken with 2 tbsp oil" is wrong. Every id you reference must exist in the ingredients list.
 
-Mark each ingredient's scales value honestly: most things scale linearly, but salt, spices, dried chilli, oil for frying and water for boiling do not — use sublinear or fixed for those.`,
+Mark each ingredient's scales value honestly: most things scale linearly, but salt, spices, dried chilli, oil for frying and water for boiling do not — use sublinear or fixed for those.
+
+Set in_bank to false for anything the household does not already have.`,
   ];
 
   if (input.previous) {
+    // Compact, not pretty-printed — the model doesn't need the indentation,
+    // and this can be the largest single block on the revise path. in_bank
+    // is stripped too: it's about to be recomputed regardless (below), so
+    // there's nothing useful for the model to preserve or reconsider there.
+    const previousForPrompt = {
+      ...input.previous,
+      ingredients: input.previous.ingredients.map(({ in_bank: _inBank, ...rest }) => rest),
+    };
+
     parts.push(
       `You are revising this recipe rather than starting again. Keep what works:\n\n${JSON.stringify(
-        input.previous,
-        null,
-        2,
+        previousForPrompt,
       )}`,
     );
   }
@@ -255,9 +268,11 @@ Mark each ingredient's scales value honestly: most things scale linearly, but sa
     },
   });
 
-  // The model does not see the bank (see prompts/system.ts), so in_bank is
-  // recomputed against the real bank rather than trusted from the response —
-  // the same trust boundary as the allergen guardrail.
+  // Recomputed against the real bank rather than trusted outright — the same
+  // belt-and-suspenders move as the allergen guardrail: a model that can see
+  // the bank can still get one entry wrong. (Deferred: dropping in_bank from
+  // what Claude is asked to produce entirely, since this always overwrites
+  // it anyway, is an optional follow-up to test locally after deployment.)
   const recipe: Recipe = {
     ...data,
     ingredients: data.ingredients.map((ingredient) => ({

@@ -1,4 +1,5 @@
 import type { MealType } from "@/lib/db/types";
+import { CATEGORY_LABELS } from "@/lib/db/types";
 import { SPICE_LABELS } from "@/lib/schemas/settings";
 import type { HouseholdContext } from "./context";
 
@@ -6,7 +7,7 @@ import type { HouseholdContext } from "./context";
  * Prompt construction (PRD 9.4).
  *
  * Split in two. The cacheable block — settings, equipment, units, dietary rules,
- * bank preferences, the cook log — is large, near-identical between calls and
+ * the ingredient bank, the cook log — is large, near-identical between calls and
  * read on every generation, so it carries a cache breakpoint and cache reads
  * cost a tenth of standard input. The per-call block carries the builder
  * constraints and any user feedback, and is never cached.
@@ -45,7 +46,7 @@ Your job is to make deciding easy. The household is not short of recipes — the
 How to think about a dish:
 - Build a plate: a protein, a healthy fat, a complex carb, and vegetables. Any of these can be left out when the dish does not want one.
 - The flavour layer is what gives a dish its character — the sauce, dressing, dip, rub, marinade or pickle. Name it specifically rather than saying "seasoned to taste".
-- Ingredients are not chosen from a fixed inventory — the household's actual cupboard is not shown to you. Favour what is listed as loved below and steer clear of what is disliked, but otherwise pick whatever the dish genuinely calls for, from what a normal supermarket stocks. What they will actually need to buy is worked out afterwards, in code, against the real bank.
+- Lean on the household's ingredient bank. You may reach outside it when a dish genuinely needs something, but say so, and keep it to things a normal supermarket stocks.
 - Prefer techniques that work reliably at home over ones that sound impressive.
 - Vary what you offer. Three suggestions that are all roast traybakes is one suggestion.
 
@@ -62,8 +63,7 @@ Quantities: give amounts in metric base units (grams, millilitres, degrees Celsi
 }
 
 /**
- * The cacheable half: who they are, how they eat, what they love or avoid.
- * Deliberately not what they own — see the note below.
+ * The cacheable half: who they are, what they own, what they like.
  *
  * Deterministically ordered so the bytes are identical between calls.
  */
@@ -125,32 +125,40 @@ export function buildHouseholdBlock(context: HouseholdContext): string {
   }
   sections.push(`HOW THEY EAT:\n${eating.join("\n")}`);
 
-  // --- Preferences pulled from the bank — not the bank itself.
-  //
-  // The model is deliberately not told what the household owns. The bank is a
-  // preference pantry, not an inventory: it exists to weight suggestions
-  // toward what this household loves and away from what they dislike, not to
-  // constrain generation to a fixed ingredient list. Whether something needs
-  // buying is worked out afterwards in code, against the real bank
-  // (src/lib/generation/bank-match.ts) — a fact the model has no way to know
-  // reliably is checked the same way the allergen guardrail is: in code,
-  // after the fact, not trusted from the response.
-  const loved = ingredients
-    .filter((i) => i.loved)
-    .map((i) => i.name)
-    .sort();
-
+  // --- The bank, grouped by category with flags. ---
   const disliked = ingredients
     .filter((i) => i.disliked)
     .map((i) => i.name)
     .sort();
 
-  if (loved.length > 0) {
-    sections.push(`LOVED — favour these when they fit:\n${loved.map((l) => `- ${l}`).join("\n")}`);
+  const usable = ingredients.filter((i) => !i.disliked && !i.allergen);
+
+  const byCategory = new Map<string, string[]>();
+  for (const ingredient of usable) {
+    const flags: string[] = [];
+    if (ingredient.loved) flags.push("loved");
+    if (ingredient.staple) flags.push("staple");
+
+    const label = flags.length > 0 ? `${ingredient.name} (${flags.join(", ")})` : ingredient.name;
+
+    const key = CATEGORY_LABELS[ingredient.category];
+    byCategory.set(key, [...(byCategory.get(key) ?? []), label]);
   }
 
+  const bankLines = Array.from(byCategory.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([category, items]) => `${category}: ${items.sort().join(", ")}`);
+
+  sections.push(
+    bankLines.length > 0
+      ? `INGREDIENT BANK — what they like and usually have.\n"loved" means favour it. "staple" means assume it is already in the cupboard.\n\n${bankLines.join("\n\n")}`
+      : "INGREDIENT BANK: empty. Suggest widely available ingredients and keep the shopping light.",
+  );
+
   if (disliked.length > 0) {
-    sections.push(`NEVER SUGGEST:\n${disliked.map((d) => `- ${d}`).join("\n")}`);
+    sections.push(
+      `NEVER SUGGEST:\n${disliked.map((d) => `- ${d}`).join("\n")}`,
+    );
   }
 
   // --- The cook log, for the recency window. ---
