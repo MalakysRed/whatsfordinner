@@ -264,7 +264,16 @@ export function SuggestionFlow({
           </p>
         )}
 
-        <RecipeCard recipe={recipe} suggestion={chosen} unitPrefs={unitPrefs} />
+        <RecipeCard
+          recipe={recipe}
+          suggestion={chosen}
+          unitPrefs={unitPrefs}
+          recipeId={chosen?.from_book?.recipe_id ?? savedId ?? undefined}
+          onSaved={(id) => {
+            setSaveState("saved");
+            setSavedId(id);
+          }}
+        />
       </div>
     );
   }

@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { Card, Pill } from "@/components/ui";
 import { CookingMode, type CookingStep } from "@/components/cooking-mode";
+import { saveRecipe } from "@/app/(app)/book/actions";
+import { addRecipeToList } from "@/app/(app)/shop/actions";
 import { formatMinutes, formatQuantity, renderStepText } from "@/lib/recipe/render";
 import {
   METRIC_PREFS,
@@ -49,12 +51,20 @@ export function RecipeCard({
   suggestion = null,
   unitPrefs = METRIC_PREFS,
   recipeId,
+  onSaved,
 }: {
   recipe: Recipe;
   suggestion?: Suggestion | null;
   unitPrefs?: UnitPrefs;
   /** The saved recipe's id, when there is one — keys cooking mode's ticked-step persistence. */
   recipeId?: string;
+  /**
+   * Fired if this card has to save the recipe itself in order to add it to
+   * the shopping list (FR9.2) — lets a caller with its own "Save to book"
+   * button (the live suggestion flow) pick up the resulting id instead of
+   * saving a second, duplicate copy if that button is pressed afterwards.
+   */
+  onSaved?: (recipeId: string) => void;
 }) {
   const [recipe, setRecipe] = useState(initialRecipe);
   const [servings, setServings] = useState(initialRecipe.base_servings);
@@ -63,6 +73,9 @@ export function RecipeCard({
   const [revising, setRevising] = useState(false);
   const [reviseError, setReviseError] = useState<string | null>(null);
   const [cooking, setCooking] = useState(false);
+  const [addingToList, setAddingToList] = useState(false);
+  const [addedToList, setAddedToList] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
 
   const prefs = effectivePrefs(unitPrefs, useImperial);
   const notInBank = recipe.ingredients.filter((i) => !i.in_bank);
@@ -104,6 +117,37 @@ export function RecipeCard({
     const clamped = Math.min(12, Math.max(1, next));
     setServings(clamped);
     setShowRecheck(needsRecheck(recipe.base_servings, clamped));
+    // The list already holds whatever was added at the old count — surface
+    // the button again rather than implying it's still current.
+    setAddedToList(false);
+  }
+
+  async function onAddToShoppingList() {
+    setAddingToList(true);
+    setListError(null);
+
+    try {
+      let id = recipeId;
+
+      if (!id) {
+        const saved = await saveRecipe(recipe, suggestion?.id ?? null, null, false);
+        if (!saved.ok || !saved.recipeId) {
+          setListError(saved.error ?? "Could not save the recipe.");
+          return;
+        }
+        id = saved.recipeId;
+        onSaved?.(id);
+      }
+
+      const result = await addRecipeToList(id, servings);
+      if (result.ok) {
+        setAddedToList(true);
+      } else {
+        setListError(result.error ?? "Could not add to the list.");
+      }
+    } finally {
+      setAddingToList(false);
+    }
   }
 
   async function recheck() {
@@ -183,13 +227,29 @@ export function RecipeCard({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setCooking(true)}
-          className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
-        >
-          Start cooking
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setCooking(true)}
+            className="min-h-12 flex-1 rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
+          >
+            Start cooking
+          </button>
+          <button
+            type="button"
+            onClick={() => void onAddToShoppingList()}
+            disabled={addingToList}
+            className="min-h-12 flex-1 rounded-xl border border-line px-4 py-3 text-base font-medium disabled:opacity-60"
+          >
+            {addingToList ? "Adding…" : addedToList ? "Added to list" : "Add to shopping list"}
+          </button>
+        </div>
+
+        {listError && (
+          <p role="alert" className="text-sm text-danger">
+            {listError}
+          </p>
+        )}
 
         {showRecheck && suggestion && (
           <Card className="space-y-3 p-4">

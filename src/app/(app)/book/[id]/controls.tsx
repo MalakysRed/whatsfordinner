@@ -5,7 +5,6 @@ import { Button, Card, Pill, Textarea } from "@/components/ui";
 import { downloadRecipeMarkdown } from "@/lib/recipe/export";
 import type { Recipe } from "@/lib/schemas/recipe";
 import { toggleFavourite, markAsCooked } from "../actions";
-import { addRecipeToList } from "../../shop/actions";
 
 export function RecipeBookControls({
   recipe,
@@ -25,8 +24,6 @@ export function RecipeBookControls({
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [cookedJustNow, setCookedJustNow] = useState(false);
-  const [addingToList, setAddingToList] = useState(false);
-  const [addedToList, setAddedToList] = useState(false);
 
   async function onToggleFavourite() {
     setTogglingFav(true);
@@ -53,16 +50,6 @@ export function RecipeBookControls({
     }
   }
 
-  async function onAddToList() {
-    setAddingToList(true);
-    try {
-      const result = await addRecipeToList(recipeId, defaultServings);
-      if (result.ok) setAddedToList(true);
-    } finally {
-      setAddingToList(false);
-    }
-  }
-
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
@@ -85,24 +72,14 @@ export function RecipeBookControls({
         </Button>
       </div>
 
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => void onAddToList()}
-          disabled={addingToList}
-          className="flex-1"
-        >
-          {addingToList ? "Adding…" : addedToList ? "Added to list" : "Add to shopping list"}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => downloadRecipeMarkdown(recipe)}
-        >
-          Export
-        </Button>
-      </div>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => downloadRecipeMarkdown(recipe)}
+        className="w-full"
+      >
+        Export
+      </Button>
 
       {cookedJustNow && <Pill tone="success">Logged — thanks</Pill>}
 
