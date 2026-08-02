@@ -83,7 +83,7 @@ export async function generatePlateOptions(
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     input.cuisine ? `CUISINE: ${input.cuisine}` : null,
-    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and six to eight for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.",
+    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.",
   ]
     .filter(Boolean)
     .join("\n\n");

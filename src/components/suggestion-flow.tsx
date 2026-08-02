@@ -1,12 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Card, Pill } from "@/components/ui";
 import { RecipeCard } from "@/components/recipe-card";
+import { saveRecipe } from "@/app/(app)/book/actions";
 import { formatMinutes } from "@/lib/recipe/render";
 import type { UnitPrefs } from "@/lib/recipe/scale";
 import type { Recipe } from "@/lib/schemas/recipe";
 import type { Suggestion } from "@/lib/schemas/suggestion";
+
+/**
+ * `from_book` is a response-envelope addition from the API, never something
+ * the model produces — see the matching type in /api/suggestions. Present
+ * when the slot quota (FR2.8) filled this suggestion from a saved recipe
+ * instead of generating one.
+ */
+type SuggestionWithBook = Suggestion & {
+  from_book: { recipe_id: string; payload: Recipe } | null;
+};
 
 export interface Constraints {
   needs_using_up?: string | null;
@@ -43,17 +55,19 @@ export function SuggestionFlow({
   unitPrefs?: UnitPrefs;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestions, setSuggestions] = useState<SuggestionWithBook[]>([]);
   const [infeasible, setInfeasible] = useState<{
     reason: string;
     wouldUnlock: string[];
   } | null>(null);
-  const [chosen, setChosen] = useState<Suggestion | null>(null);
+  const [chosen, setChosen] = useState<SuggestionWithBook | null>(null);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [feedback, setFeedback] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   // Every title shown and turned down, so the next call does not repeat itself.
   const rejected = useRef<string[]>([]);
@@ -109,10 +123,22 @@ export function SuggestionFlow({
   );
 
   const choose = useCallback(
-    async (suggestion: Suggestion) => {
+    async (suggestion: SuggestionWithBook) => {
       setChosen(suggestion);
-      setPhase("cooking");
       setError(null);
+      setSaveState("idle");
+      setSavedId(null);
+
+      // A repeat slot already holds the full stored card — render it directly,
+      // with no API call at all (FR2.9).
+      if (suggestion.from_book) {
+        setRecipe(suggestion.from_book.payload);
+        setGenerationId(null);
+        setPhase("recipe");
+        return;
+      }
+
+      setPhase("cooking");
 
       try {
         const response = await fetch("/api/recipe", {
@@ -146,6 +172,23 @@ export function SuggestionFlow({
     },
     [constraints, defaultServings],
   );
+
+  const save = useCallback(async () => {
+    if (!recipe) return;
+    setSaveState("saving");
+
+    try {
+      const result = await saveRecipe(recipe, chosen?.id ?? null, generationId, false);
+      if (result.ok && result.recipeId) {
+        setSaveState("saved");
+        setSavedId(result.recipeId);
+      } else {
+        setSaveState("error");
+      }
+    } catch {
+      setSaveState("error");
+    }
+  }, [recipe, chosen, generationId]);
 
   const started = useRef(false);
   useEffect(() => {
@@ -181,13 +224,46 @@ export function SuggestionFlow({
   if (phase === "recipe" && recipe) {
     return (
       <div className="space-y-4">
-        <button
-          type="button"
-          onClick={() => setPhase("suggestions")}
-          className="min-h-11 text-sm text-muted underline"
-        >
-          Back to the other two
-        </button>
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setPhase("suggestions")}
+            className="min-h-11 text-sm text-muted underline"
+          >
+            Back to the other two
+          </button>
+
+          {chosen?.from_book ? (
+            <Link
+              href={`/book/${chosen.from_book.recipe_id}`}
+              className="min-h-11 text-sm font-medium text-accent underline"
+            >
+              View in book
+            </Link>
+          ) : saveState === "saved" && savedId ? (
+            <Link href={`/book/${savedId}`} className="min-h-11 text-sm font-medium text-accent underline">
+              Saved — view in book
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saveState === "saving"}
+              className="min-h-11 text-sm font-medium text-accent underline disabled:opacity-60"
+            >
+              {saveState === "saving" ? "Saving…" : "Save to book"}
+            </button>
+          )}
+        </div>
+
+        {chosen?.from_book && <Pill tone="accent">From your book</Pill>}
+
+        {saveState === "error" && (
+          <p role="alert" className="text-sm text-danger">
+            Could not save. Try again.
+          </p>
+        )}
+
         <RecipeCard recipe={recipe} suggestion={chosen} unitPrefs={unitPrefs} />
       </div>
     );
@@ -246,7 +322,7 @@ function SuggestionCard({
   suggestion,
   onChoose,
 }: {
-  suggestion: Suggestion;
+  suggestion: SuggestionWithBook;
   onChoose: () => void;
 }) {
   const nothingToBuy = suggestion.ingredients_not_in_bank.length === 0;
@@ -260,7 +336,10 @@ function SuggestionCard({
       >
         <div className="flex items-start justify-between gap-3">
           <h3 className="text-lg font-semibold leading-tight">{suggestion.title}</h3>
-          {nothingToBuy && <Pill tone="success">Nothing to buy</Pill>}
+          <span className="flex shrink-0 gap-1">
+            {suggestion.from_book && <Pill tone="accent">From your book</Pill>}
+            {nothingToBuy && <Pill tone="success">Nothing to buy</Pill>}
+          </span>
         </div>
 
         <p className="text-base leading-relaxed text-muted">{suggestion.pitch}</p>

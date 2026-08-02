@@ -151,6 +151,34 @@ export function Pill({
   );
 }
 
+/** Initials on a background colour, for attribution ("Added by X"). */
+export function Avatar({
+  name,
+  colour,
+}: {
+  name: string;
+  colour?: string | null;
+}) {
+  const initials =
+    name
+      .trim()
+      .split(/\s+/)
+      .map((word) => word[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "?";
+
+  return (
+    <span
+      aria-hidden
+      style={{ backgroundColor: colour ?? "var(--accent)" }}
+      className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-on-accent"
+    >
+      {initials}
+    </span>
+  );
+}
+
 export function EmptyState({
   title,
   children,

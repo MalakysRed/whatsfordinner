@@ -78,10 +78,15 @@ export const plateOptionSchema = z.object({
   in_bank: z.boolean(),
 });
 
+/**
+ * Capped above what the prompt actually asks for (four to six carbs/fats,
+ * eight to twelve veg) so a runaway response can't dump an unbounded wall of
+ * chips into the builder — a ceiling, not the target count.
+ */
 export const plateOptionsResponseSchema = z.object({
-  carbs: z.array(plateOptionSchema),
-  fats: z.array(plateOptionSchema),
-  veg: z.array(plateOptionSchema),
+  carbs: z.array(plateOptionSchema).max(8),
+  fats: z.array(plateOptionSchema).max(8),
+  veg: z.array(plateOptionSchema).max(14),
 });
 
 export type PlateOption = z.infer<typeof plateOptionSchema>;

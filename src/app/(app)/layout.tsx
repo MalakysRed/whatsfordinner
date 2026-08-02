@@ -18,6 +18,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <nav className="fixed inset-x-0 bottom-0 border-t border-line bg-raised/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-md items-stretch justify-around pb-[env(safe-area-inset-bottom)]">
           <NavLink href="/" label="Dinner" />
+          <NavLink href="/book" label="Book" />
           <NavLink href="/ingredients" label="Bank" />
           <NavLink href="/settings" label="Settings" />
         </div>

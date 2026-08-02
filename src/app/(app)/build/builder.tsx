@@ -7,7 +7,7 @@ import type { FlavourOption, PlateOption } from "@/lib/schemas/suggestion";
 import type { IngredientCategory } from "@/lib/db/types";
 import type { UnitPrefs } from "@/lib/recipe/scale";
 
-const CUISINES = [
+export const CUISINES = [
   "Mexican", "Indian", "Japanese", "Thai", "Italian", "Greek",
   "Middle Eastern", "Chinese", "Korean", "French", "British", "Spanish",
   "Vietnamese",
