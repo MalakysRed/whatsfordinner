@@ -83,7 +83,7 @@ export default async function BookRecipePage({
         defaultServings={recipe.base_servings}
       />
 
-      <RecipeCard recipe={recipe} unitPrefs={(settings as UnitPrefs) ?? undefined} />
+      <RecipeCard recipe={recipe} unitPrefs={(settings as UnitPrefs) ?? undefined} recipeId={recipeRow.id} />
     </div>
   );
 }

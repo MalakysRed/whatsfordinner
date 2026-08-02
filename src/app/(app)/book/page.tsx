@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { requireHouseholdSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { Avatar, Card, EmptyState, Pill } from "@/components/ui";
-import { formatMinutes } from "@/lib/recipe/render";
+import { EmptyState } from "@/components/ui";
 import type { Difficulty } from "@/lib/db/types";
 import { BookFilters } from "./filters";
+import { RecipeList, type BookRecipeRow } from "./recipe-list";
 
 interface RecipeListRow {
   id: string;
@@ -84,6 +83,21 @@ export default async function BookPage({
     ((members ?? []) as unknown as Member[]).map((m) => [m.user_id, m.users]),
   );
 
+  const rows: BookRecipeRow[] = recipes.map((recipe) => {
+    const addedBy = memberMap.get(recipe.created_by);
+    return {
+      id: recipe.id,
+      title: recipe.title,
+      description: recipe.description,
+      cuisine: recipe.cuisine,
+      total_minutes: recipe.total_minutes,
+      difficulty: recipe.difficulty,
+      addedByName: addedBy?.display_name ?? "?",
+      addedByColour: addedBy?.avatar_colour ?? null,
+      favouriteCount: recipe.favourites.length,
+    };
+  });
+
   return (
     <div className="space-y-5">
       <header className="space-y-1">
@@ -99,52 +113,12 @@ export default async function BookPage({
         q={params.q ?? ""}
       />
 
-      {recipes.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState title="Nothing saved yet">
           Save a recipe card from a suggestion and it turns up here.
         </EmptyState>
       ) : (
-        <ul className="space-y-3">
-          {recipes.map((recipe) => {
-            const addedBy = memberMap.get(recipe.created_by);
-            const favouriteCount = recipe.favourites.length;
-
-            return (
-              <li key={recipe.id}>
-                <Link href={`/book/${recipe.id}`}>
-                  <Card className="space-y-2 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <h2 className="text-base font-semibold leading-tight">{recipe.title}</h2>
-                      <Avatar
-                        name={addedBy?.display_name ?? "?"}
-                        colour={addedBy?.avatar_colour}
-                      />
-                    </div>
-
-                    {recipe.description && (
-                      <p className="line-clamp-2 text-sm leading-relaxed text-muted">
-                        {recipe.description}
-                      </p>
-                    )}
-
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
-                      {recipe.cuisine && <span>{recipe.cuisine}</span>}
-                      {recipe.total_minutes !== null && (
-                        <span>{formatMinutes(recipe.total_minutes)}</span>
-                      )}
-                      {recipe.difficulty && <span>{recipe.difficulty}</span>}
-                      {favouriteCount > 0 && (
-                        <Pill tone="accent">
-                          {favouriteCount === 1 ? "Favourited" : "Favourited by both"}
-                        </Pill>
-                      )}
-                    </div>
-                  </Card>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <RecipeList recipes={rows} />
       )}
     </div>
   );

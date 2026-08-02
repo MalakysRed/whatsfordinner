@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Card, Pill } from "@/components/ui";
+import { CookingMode, type CookingStep } from "@/components/cooking-mode";
 import { formatMinutes, formatQuantity, renderStepText } from "@/lib/recipe/render";
 import {
   METRIC_PREFS,
@@ -47,10 +48,13 @@ export function RecipeCard({
   recipe: initialRecipe,
   suggestion = null,
   unitPrefs = METRIC_PREFS,
+  recipeId,
 }: {
   recipe: Recipe;
   suggestion?: Suggestion | null;
   unitPrefs?: UnitPrefs;
+  /** The saved recipe's id, when there is one — keys cooking mode's ticked-step persistence. */
+  recipeId?: string;
 }) {
   const [recipe, setRecipe] = useState(initialRecipe);
   const [servings, setServings] = useState(initialRecipe.base_servings);
@@ -58,6 +62,7 @@ export function RecipeCard({
   const [showRecheck, setShowRecheck] = useState(false);
   const [revising, setRevising] = useState(false);
   const [reviseError, setReviseError] = useState<string | null>(null);
+  const [cooking, setCooking] = useState(false);
 
   const prefs = effectivePrefs(unitPrefs, useImperial);
   const notInBank = recipe.ingredients.filter((i) => !i.in_bank);
@@ -73,6 +78,27 @@ export function RecipeCard({
       return { ...ingredient, amount: converted.amount, unit: converted.unit };
     });
   }, [recipe, servings, prefs]);
+
+  const ingredientLines = useMemo(
+    () =>
+      displayIngredients.map((ingredient) => {
+        const parts = [formatQuantity(ingredient)];
+        if (ingredient.prep) parts.push(ingredient.prep);
+        return parts.join(", ") + (ingredient.optional ? " (optional)" : "");
+      }),
+    [displayIngredients],
+  );
+
+  const cookingSteps: CookingStep[] = useMemo(
+    () =>
+      recipe.steps.map((step) => ({
+        n: step.n,
+        text: renderStepText(step.text, displayIngredients),
+        durationSeconds: step.duration_seconds,
+        temperatureText: step.temperature_c !== null ? convertTemperature(step.temperature_c, prefs) : null,
+      })),
+    [recipe.steps, displayIngredients, prefs],
+  );
 
   function adjustServings(next: number) {
     const clamped = Math.min(12, Math.max(1, next));
@@ -156,6 +182,14 @@ export function RecipeCard({
             {useImperial ? "Imperial" : "Metric"}
           </button>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setCooking(true)}
+          className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
+        >
+          Start cooking
+        </button>
 
         {showRecheck && suggestion && (
           <Card className="space-y-3 p-4">
@@ -295,6 +329,16 @@ export function RecipeCard({
             </p>
           )}
         </section>
+      )}
+
+      {cooking && (
+        <CookingMode
+          recipeKey={recipeId ?? recipe.title}
+          title={recipe.title}
+          steps={cookingSteps}
+          ingredientLines={ingredientLines}
+          onClose={() => setCooking(false)}
+        />
       )}
     </article>
   );

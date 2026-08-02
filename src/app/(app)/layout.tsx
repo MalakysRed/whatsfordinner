@@ -19,6 +19,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <div className="mx-auto flex w-full max-w-md items-stretch justify-around pb-[env(safe-area-inset-bottom)]">
           <NavLink href="/" label="Dinner" />
           <NavLink href="/book" label="Book" />
+          <NavLink href="/shop" label="Shop" />
           <NavLink href="/ingredients" label="Bank" />
           <NavLink href="/settings" label="Settings" />
         </div>
