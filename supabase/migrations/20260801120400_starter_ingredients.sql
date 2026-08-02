@@ -10,7 +10,12 @@
 -- a fixed reference. staple_default marks the things it is safe to assume live
 -- in a cupboard, which keeps them off shopping lists (A3).
 
-create table starter_ingredients (
+-- IF NOT EXISTS / drop-then-create / ON CONFLICT throughout this file: a
+-- migration that fails partway on a hosted project (as this one did, on the
+-- unrelated permission issue in the previous file) needs to be safe to just
+-- re-run from scratch rather than requiring a human to work out by hand how
+-- far it got.
+create table if not exists starter_ingredients (
   name text primary key,
   category ingredient_category not null,
   typical_unit text,
@@ -20,6 +25,7 @@ create table starter_ingredients (
 alter table starter_ingredients enable row level security;
 
 -- Readable by anyone signed in; it is a reference list, not household data.
+drop policy if exists starter_ingredients_read on starter_ingredients;
 create policy starter_ingredients_read on starter_ingredients
   for select to authenticated using (true);
 
@@ -218,7 +224,8 @@ insert into starter_ingredients (name, category, typical_unit, staple_default) v
   ('Harissa', 'condiment', 'tbsp', true),
   ('Thai green curry paste', 'condiment', 'tbsp', true),
   ('Thai red curry paste', 'condiment', 'tbsp', true),
-  ('Mirin', 'condiment', 'tbsp', true);
+  ('Mirin', 'condiment', 'tbsp', true)
+on conflict (name) do nothing;
 
 -- Copies the starter set into a household's bank. Names already present are left
 -- alone, so this is safe to run again to top up after the catalogue grows.
