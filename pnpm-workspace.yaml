@@ -1,6 +1,12 @@
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
+# sharp needs its native binary for Next.js image optimization to work at
+# runtime; unrs-resolver (used by ESLint's import resolver) needs its native
+# build too. pnpm 11 refuses to run any install script by default and exits
+# non-zero until each package is explicitly approved — this is what records
+# that approval so a fresh install doesn't stop and wait for a human. Recorded
+# by `pnpm approve-builds --all`, not written by hand.
+allowBuilds:
+  sharp: true
+  unrs-resolver: true
 
 # pnpm 11+ refuses to install any lockfile entry published within the last day
 # by default (minimumReleaseAge, 1440 minutes), as a supply-chain safeguard
