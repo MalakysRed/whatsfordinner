@@ -1,3 +1,13 @@
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+
+# pnpm 11+ refuses to install any lockfile entry published within the last day
+# by default (minimumReleaseAge, 1440 minutes), as a supply-chain safeguard
+# against just-published/compromised releases. Two transitive dependencies
+# happened to publish new versions right around when this lockfile was
+# generated, which blocks a clean install on any pnpm 11+ machine. The
+# lockfile itself was resolved deliberately, not auto-updated, so there is
+# nothing here for the age check to protect against — disabled project-wide
+# rather than requiring every contributor to override it locally.
+minimumReleaseAge: 0
