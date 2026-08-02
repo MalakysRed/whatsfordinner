@@ -20,6 +20,7 @@ import {
 import { runGeneration } from "./client";
 import { buildRequestBlock, wrapUserText, type BuilderConstraints } from "./prompts/system";
 import type { HouseholdContext } from "./prompts/context";
+import { isInBank, namesNotInBank } from "@/lib/generation/bank-match";
 import type { MealType } from "@/lib/db/types";
 
 interface Caller {
@@ -46,7 +47,7 @@ export async function generateFlavours(
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     described ? `CHOSEN SO FAR: ${described}` : null,
-    "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" Favour ones the household could actually make from their bank.",
+    "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" Favour combinations built from real, ordinary ingredients over anything obscure.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -64,10 +65,10 @@ export async function generateFlavours(
 /**
  * Options for the rest of the plate — a complex carb, a healthy fat, and
  * vegetables or fruit — offered before the flavour layer step (PRD 7.2's
- * builder redesign). Bank-first: the household block already excludes
- * disliked and allergen ingredients, so a truthful model naturally leaves them
- * out, but it may still suggest something outside the bank when nothing in it
- * fits — flagged honestly via in_bank rather than pretended into the bank.
+ * builder redesign). The model does not see the bank (see prompts/system.ts),
+ * so it cannot say honestly which options the household already has —
+ * `in_bank` on the response is discarded and recomputed here against the
+ * real bank instead, the same trust boundary as the allergen guardrail.
  */
 export async function generatePlateOptions(
   caller: Caller,
@@ -83,7 +84,7 @@ export async function generatePlateOptions(
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     input.cuisine ? `CUISINE: ${input.cuisine}` : null,
-    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.",
+    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Ordinary, real ingredients from a normal supermarket — do not worry about what the household already has, the app works that out separately.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -95,12 +96,22 @@ export async function generatePlateOptions(
     schema: plateOptionsResponseSchema,
   });
 
+  const withRealBank = <T extends { name: string }>(options: T[]) =>
+    options.map((option) => ({ ...option, in_bank: isInBank(option.name, caller.context.ingredients) }));
+
   return {
-    carbs: data.carbs,
-    fats: data.fats,
-    veg: data.veg,
+    carbs: withRealBank(data.carbs),
+    fats: withRealBank(data.fats),
+    veg: withRealBank(data.veg),
     generationId,
   };
+}
+
+/** Every ingredient a suggestion actually names — the small, fixed set on `components`. */
+function namedComponents(components: Suggestion["components"]): string[] {
+  return [components.protein, components.fat, components.carb, ...components.veg].filter(
+    (name): name is string => Boolean(name),
+  );
 }
 
 /**
@@ -147,8 +158,17 @@ export async function generateSuggestions(
     },
   });
 
+  // The model does not see the bank (see prompts/system.ts), so it cannot say
+  // honestly what still needs buying — recompute ingredients_not_in_bank
+  // against the real bank rather than trust whatever it returned, the same
+  // trust boundary as the allergen guardrail.
+  const withRealBank = data.suggestions.map((suggestion) => ({
+    ...suggestion,
+    ingredients_not_in_bank: namesNotInBank(namedComponents(suggestion.components), caller.context.ingredients),
+  }));
+
   // "Nothing to buy" sorts first (FR11.3).
-  const suggestions = [...data.suggestions].sort((a, b) => {
+  const suggestions = [...withRealBank].sort((a, b) => {
     const aClean = needsNothingExtra(a) ? 0 : 1;
     const bClean = needsNothingExtra(b) ? 0 : 1;
     return aClean - bClean;
@@ -196,9 +216,7 @@ Write it for ${servings} ${servings === 1 ? "person" : "people"} and set base_se
 
     `Every quantity mentioned in a step must be written as a placeholder referencing the ingredient's id — {ing_1}, {ing_2} and so on — never as a literal amount. The app substitutes the scaled amount when it renders, so "Toss {ing_1} with {ing_4} and leave for 15 minutes" is right and "Toss 400g chicken with 2 tbsp oil" is wrong. Every id you reference must exist in the ingredients list.
 
-Mark each ingredient's scales value honestly: most things scale linearly, but salt, spices, dried chilli, oil for frying and water for boiling do not — use sublinear or fixed for those.
-
-Set in_bank to false for anything the household does not already have.`,
+Mark each ingredient's scales value honestly: most things scale linearly, but salt, spices, dried chilli, oil for frying and water for boiling do not — use sublinear or fixed for those.`,
   ];
 
   if (input.previous) {
@@ -237,5 +255,16 @@ Set in_bank to false for anything the household does not already have.`,
     },
   });
 
-  return { recipe: data, generationId };
+  // The model does not see the bank (see prompts/system.ts), so in_bank is
+  // recomputed against the real bank rather than trusted from the response —
+  // the same trust boundary as the allergen guardrail.
+  const recipe: Recipe = {
+    ...data,
+    ingredients: data.ingredients.map((ingredient) => ({
+      ...ingredient,
+      in_bank: isInBank(ingredient.item, caller.context.ingredients),
+    })),
+  };
+
+  return { recipe, generationId };
 }

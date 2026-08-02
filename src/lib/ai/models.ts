@@ -85,7 +85,7 @@ export const MODEL_FOR_CALL: Record<GenerationType, ModelKey> = {
 export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> = {
   flavour: "low",
   plate: "low",
-  suggestions: "medium",
+  suggestions: "low",
   recipe: "medium",
 };
 
