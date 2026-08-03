@@ -10,6 +10,7 @@ import { buildCoworkExport, downloadCoworkExport, type CoworkSettings } from "@/
 import {
   addManualItem,
   archiveActiveList,
+  clearActiveList,
   removeListItem,
   setIncludeStaples,
   toggleItemTicked,
@@ -41,6 +42,7 @@ export function ShoppingList({
   const [manualAmount, setManualAmount] = useState("");
   const [manualUnit, setManualUnit] = useState("");
   const [archiving, setArchiving] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -122,6 +124,16 @@ export function ShoppingList({
     }
   }
 
+  async function onClear() {
+    setClearing(true);
+    setItems([]);
+    try {
+      await clearActiveList(listId);
+    } finally {
+      setClearing(false);
+    }
+  }
+
   function onExport() {
     const text = buildCoworkExport(
       items.map((i) => ({ item: i.item, amount: i.amount, unit: i.unit, category: i.category })),
@@ -152,9 +164,16 @@ export function ShoppingList({
           />
           Include staples
         </label>
-        <Button type="button" variant="secondary" onClick={() => void onArchive()} disabled={archiving}>
-          {archiving ? "Archiving…" : "Done shopping"}
-        </Button>
+        <div className="flex gap-2">
+          {items.length > 0 && (
+            <Button type="button" variant="secondary" onClick={() => void onClear()} disabled={clearing}>
+              {clearing ? "Clearing…" : "Empty list"}
+            </Button>
+          )}
+          <Button type="button" variant="secondary" onClick={() => void onArchive()} disabled={archiving}>
+            {archiving ? "Archiving…" : "Done shopping"}
+          </Button>
+        </div>
       </Card>
 
       {items.length === 0 ? (
