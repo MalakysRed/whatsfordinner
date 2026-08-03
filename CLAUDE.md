@@ -115,6 +115,13 @@ implement, and every link will bounce to `/login?error=link_invalid` until
 both are changed. Inviting someone from Settings uses the invite template;
 signing in uses the magic-link one.
 
+If Auth → SMTP Settings points at Resend (or any provider) in sandbox/test
+mode, every email to anyone other than the account's own verified address
+silently 500s server-side — Resend's own dashboard logs it, Supabase's Auth
+Logs show it, but the client only ever sees an opaque failure. Verify a
+domain at resend.com/domains and point the SMTP sender address at it before
+assuming invites (or magic links to anyone but the owner) are broken code.
+
 ## Conventions
 
 - Mobile first. Design against a 390px viewport; desktop is a courtesy.
