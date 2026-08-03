@@ -94,6 +94,7 @@ export interface SettingsRow {
   supermarket: string | null;
   delivery_day: string | null;
   shopping_notes: string | null;
+  default_include_staples: boolean;
   daily_generation_cap: number;
   only_new: boolean;
   recency_weighting: RecencyWeighting;

@@ -36,6 +36,7 @@ export const shoppingSchema = z.object({
   supermarket: z.string().max(120).nullable(),
   delivery_day: z.string().max(40).nullable(),
   shopping_notes: z.string().max(2000).nullable(),
+  default_include_staples: z.boolean(),
 });
 
 export const generationSchema = z.object({

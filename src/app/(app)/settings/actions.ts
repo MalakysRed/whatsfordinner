@@ -124,6 +124,7 @@ export async function saveShopping(
     supermarket: text(formData, "supermarket"),
     delivery_day: text(formData, "delivery_day"),
     shopping_notes: text(formData, "shopping_notes"),
+    default_include_staples: checked(formData, "default_include_staples"),
   });
 
   if (!parsed.success) return { status: "error", message: "Those settings did not look right." };

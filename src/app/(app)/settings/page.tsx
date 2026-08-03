@@ -339,6 +339,16 @@ export default async function SettingsPage() {
               placeholder="Own brand is fine except olive oil and coffee. Free range eggs only. No palm oil."
             />
           </div>
+
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              name="default_include_staples"
+              defaultChecked={typedSettings.default_include_staples}
+              className="size-5 shrink-0 accent-[var(--accent)]"
+            />
+            <span className="text-base">Include staples in a new list by default</span>
+          </label>
         </SaveForm>
       </Section>
 

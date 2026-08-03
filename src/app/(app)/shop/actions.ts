@@ -31,9 +31,15 @@ async function activeList(supabase: SupabaseClient, householdId: string): Promis
 
   if (existing) return existing;
 
+  const { data: settings } = await supabase
+    .from("settings")
+    .select("default_include_staples")
+    .eq("household_id", householdId)
+    .single();
+
   const { data: created } = await supabase
     .from("shopping_lists")
-    .insert({ household_id: householdId })
+    .insert({ household_id: householdId, include_staples: settings?.default_include_staples ?? false })
     .select("id, include_staples")
     .single();
 
