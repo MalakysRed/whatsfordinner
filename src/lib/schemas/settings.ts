@@ -54,6 +54,16 @@ export const dietaryRuleSchema = z.object({
   value: z.string().min(1).max(120),
 });
 
+/** FR1.4 — defaults to the email's local part at signup; rarely what you want kept. */
+export const displayNameSchema = z.object({
+  display_name: z.string().min(1).max(60),
+});
+
+/** FR1.3 — defaults to "Our kitchen" at signup unless changed there. */
+export const householdNameSchema = z.object({
+  name: z.string().min(1).max(80),
+});
+
 export type Measurements = z.infer<typeof measurementsSchema>;
 export type HouseholdDefaults = z.infer<typeof householdDefaultsSchema>;
 export type Variety = z.infer<typeof varietySchema>;

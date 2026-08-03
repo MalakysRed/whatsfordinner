@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 import { requireHouseholdSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import {
+  displayNameSchema,
   generationSchema,
   householdDefaultsSchema,
+  householdNameSchema,
   measurementsSchema,
   shoppingSchema,
   varietySchema,
@@ -295,6 +297,63 @@ export async function removeDietaryRule(formData: FormData): Promise<void> {
   await supabase.from("dietary_rules").delete().eq("id", id).eq("user_id", session.userId);
 
   revalidatePath("/settings");
+}
+
+/**
+ * FR1.4 — your own name, as the rest of the household sees it. Anyone may set
+ * their own; there is nothing here for a role check to gate.
+ */
+export async function saveDisplayName(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await requireHouseholdSession();
+
+  const parsed = displayNameSchema.safeParse({
+    display_name: text(formData, "display_name"),
+  });
+
+  if (!parsed.success) return { status: "error", message: "Enter a name." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("users")
+    .update({ display_name: parsed.data.display_name })
+    .eq("id", session.userId);
+
+  if (error) return { status: "error", message: "Could not save. Try again." };
+
+  revalidatePath("/settings");
+  return { status: "saved" };
+}
+
+/** FR1.3 — the household's own name. Owner only, same as renaming any shared thing. */
+export async function saveHouseholdName(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await requireHouseholdSession();
+
+  if (session.role !== "owner") {
+    return { status: "error", message: "Only the household owner can rename it." };
+  }
+
+  const parsed = householdNameSchema.safeParse({
+    name: text(formData, "name"),
+  });
+
+  if (!parsed.success) return { status: "error", message: "Enter a name." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("households")
+    .update({ name: parsed.data.name })
+    .eq("id", session.householdId);
+
+  if (error) return { status: "error", message: "Could not save. Try again." };
+
+  revalidatePath("/settings");
+  return { status: "saved" };
 }
 
 /** FR1.3 — a 7 day invite link. Owner only. */

@@ -16,9 +16,11 @@ import {
   addDietaryRule,
   createInvite,
   removeDietaryRule,
+  saveDisplayName,
   saveEquipment,
   saveGenerationSettings,
   saveHouseholdDefaults,
+  saveHouseholdName,
   saveMeasurements,
   saveShopping,
 } from "./actions";
@@ -32,6 +34,7 @@ export default async function SettingsPage() {
     { data: equipment },
     { data: rules },
     { data: members },
+    { data: household },
   ] = await Promise.all([
     supabase.from("settings").select("*").eq("household_id", session.householdId).single(),
     supabase
@@ -44,6 +47,7 @@ export default async function SettingsPage() {
       .from("memberships")
       .select("role, users(id, email, display_name)")
       .eq("household_id", session.householdId),
+    supabase.from("households").select("name").eq("id", session.householdId).single(),
   ]);
 
   if (!settings) {
@@ -60,6 +64,8 @@ export default async function SettingsPage() {
     role: string;
     users: UserRow;
   }[];
+
+  const ownRow = memberRows.find((m) => m.users.id === session.userId);
 
   return (
     <div className="space-y-10">
@@ -364,7 +370,40 @@ export default async function SettingsPage() {
 
       {/* FR1.3, FR1.4 */}
       <Section title="Household">
-        <div className="space-y-3">
+        <div className="space-y-5">
+          <SaveForm action={saveHouseholdName} submitLabel="Save name">
+            <div className="space-y-2">
+              <Label htmlFor="household_name">What you call it</Label>
+              <Input
+                id="household_name"
+                name="name"
+                defaultValue={household?.name ?? ""}
+                disabled={session.role !== "owner"}
+              />
+              {session.role !== "owner" && (
+                <p className="text-sm text-muted">
+                  Only the household owner can rename it.
+                </p>
+              )}
+            </div>
+          </SaveForm>
+
+          <SaveForm action={saveDisplayName} submitLabel="Save your name">
+            <div className="space-y-2">
+              <Label htmlFor="display_name">Your name</Label>
+              <Input
+                id="display_name"
+                name="display_name"
+                defaultValue={ownRow?.users.display_name ?? ""}
+                placeholder="What should we call you?"
+              />
+              <p className="text-sm text-muted">
+                Shown to the other person in your household, wherever your name
+                appears.
+              </p>
+            </div>
+          </SaveForm>
+
           <Card className="divide-y divide-line">
             {memberRows.map(({ role, users: member }) => (
               <div key={member.id} className="flex items-center justify-between p-4">
