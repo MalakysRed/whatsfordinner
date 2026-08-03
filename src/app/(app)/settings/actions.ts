@@ -395,7 +395,7 @@ export async function createInvite(
   }
 
   const origin = (await headers()).get("origin") ?? "";
-  const redirectTo = `${origin}/auth/confirm?next=${encodeURIComponent(`/invite/${token}`)}`;
+  const redirectTo = `${origin}/invite/${token}`;
 
   const admin = createAdminClient();
   const { error: inviteEmailError } = await admin.auth.admin.inviteUserByEmail(email, {
