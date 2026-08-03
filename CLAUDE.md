@@ -107,10 +107,13 @@ pnpm setup:allowlist  # seed signup_allowlist from BOOTSTRAP_SIGNUP_EMAILS
 First run against a hosted project: `supabase link --project-ref <ref>`,
 `supabase db push`, `pnpm setup:allowlist`. Then in the dashboard set Auth → URL
 Configuration (Site URL plus `/auth/confirm` and `/auth/confirm?next=*` as
-redirect URLs) and override the magic-link email template to
-`{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` — the stock
-template uses a flow `/auth/confirm` does not implement, and every link will
-bounce to `/login?error=link_invalid` until it is changed.
+redirect URLs) and override **both** the magic-link and the invite email
+templates to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`
+and `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite`
+respectively — the stock templates use a flow `/auth/confirm` does not
+implement, and every link will bounce to `/login?error=link_invalid` until
+both are changed. Inviting someone from Settings uses the invite template;
+signing in uses the magic-link one.
 
 ## Conventions
 
