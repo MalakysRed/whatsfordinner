@@ -136,6 +136,7 @@ export function Builder({
           protein: protein || null,
           taste_profile: effectiveTasteProfile.length ? effectiveTasteProfile : null,
           cuisine,
+          batch_cooking: batchCooking || null,
         }),
       });
       const body = await response.json();
@@ -159,6 +160,7 @@ export function Builder({
           cuisine,
           taste_profile: effectiveTasteProfile.length ? effectiveTasteProfile : null,
           components: [protein, carb, fat, ...veg].filter(Boolean),
+          batch_cooking: batchCooking || null,
         }),
       });
       const body = await response.json();
@@ -196,7 +198,27 @@ export function Builder({
 
   return (
     <div className="space-y-4 pb-24">
-      {/* Needs using up — first, because it is the strongest constraint. */}
+      <Section title="Batch cooking" summary={batchCooking ? "On" : "Off"}>
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={batchCooking}
+            onChange={(e) => setBatchCooking(e.target.checked)}
+            className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+          />
+          <span className="text-base">
+            Cooking in bulk to freeze portions
+            <span className="mt-0.5 block text-sm text-muted">
+              Rules out anything that freezes or reheats badly — fresh salads,
+              mayonnaise or cream sauces that split, soggy fried coatings.
+              Applies to every suggestion from here, including the plate and
+              flavour layer helpers below.
+            </span>
+          </span>
+        </label>
+      </Section>
+
+      {/* Needs using up — first among the actual constraints, because it is the strongest one. */}
       <Section title="Needs using up" summary={needsUsingUp || "Nothing in particular"} open={focusUseItUp}>
         <input
           value={needsUsingUp}
@@ -473,24 +495,6 @@ export function Builder({
             +
           </button>
         </div>
-      </Section>
-
-      <Section title="Batch cooking" summary={batchCooking ? "On" : "Off"}>
-        <label className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            checked={batchCooking}
-            onChange={(e) => setBatchCooking(e.target.checked)}
-            className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
-          />
-          <span className="text-base">
-            Cooking in bulk to freeze portions
-            <span className="mt-0.5 block text-sm text-muted">
-              Rules out anything that freezes or reheats badly — fresh salads,
-              mayonnaise or cream sauces that split, soggy fried coatings.
-            </span>
-          </span>
-        </label>
       </Section>
 
       {/* Sticky, because the page scrolls and the action should not. */}

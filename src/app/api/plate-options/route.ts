@@ -7,6 +7,7 @@ const bodySchema = z.object({
   protein: z.string().max(80).nullish(),
   taste_profile: z.array(z.string().max(40)).max(8).nullish(),
   cuisine: z.string().max(80).nullish(),
+  batch_cooking: z.boolean().nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -25,6 +26,7 @@ export async function POST(request: NextRequest) {
       protein: parsed.data.protein,
       tasteProfile: parsed.data.taste_profile,
       cuisine: parsed.data.cuisine,
+      batchCooking: parsed.data.batch_cooking,
     });
 
     return NextResponse.json({

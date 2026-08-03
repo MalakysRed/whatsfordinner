@@ -148,6 +148,7 @@ export function SuggestionFlow({
           body: JSON.stringify({
             suggestion,
             servings: constraints.servings ?? defaultServings,
+            batch_cooking: constraints.batch_cooking ?? null,
           }),
         });
 
@@ -270,6 +271,7 @@ export function SuggestionFlow({
           suggestion={chosen}
           unitPrefs={unitPrefs}
           recipeId={chosen?.from_book?.recipe_id ?? savedId ?? undefined}
+          batchCooking={constraints.batch_cooking}
           onSaved={(id) => {
             setSaveState("saved");
             setSavedId(id);

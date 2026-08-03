@@ -198,6 +198,15 @@ export interface BuilderConstraints {
 }
 
 /**
+ * Shared across every generation call the builder can trigger (plate options,
+ * flavour layers, suggestions, the recipe itself and its revise path) —
+ * whatever gets offered has to actually survive freezing, not just the final
+ * suggestion.
+ */
+export const BATCH_COOKING_INSTRUCTION =
+  "BATCH COOKING: this will be cooked in bulk and frozen in portions, then reheated later. Everything offered must freeze and reheat well — no dish built around fresh salad, mayonnaise or other emulsified sauces that split, cream sauces that split on reheating, fried or battered coatings that go soggy, or anything where boiled potatoes/pasta are the point rather than an incidental component. Favour stews, curries, braises, bolognese-style sauces, soups, casseroles, chillis and similar.";
+
+/**
  * The uncached half: what they asked for, this time.
  *
  * Kept strictly after the cacheable block so that nothing here can shift the
@@ -233,9 +242,7 @@ export function buildRequestBlock(constraints: BuilderConstraints): string {
   }
 
   if (constraints.batchCooking) {
-    parts.push(
-      "BATCH COOKING: this will be cooked in bulk and frozen in portions, then reheated later. Every suggestion must freeze and reheat well — no dish built around fresh salad, mayonnaise or other emulsified sauces that split, cream sauces that split on reheating, fried or battered coatings that go soggy, or anything where boiled potatoes/pasta are the point rather than an incidental component. Favour stews, curries, braises, bolognese-style sauces, soups, casseroles, chillis and similar.",
-    );
+    parts.push(BATCH_COOKING_INSTRUCTION);
   }
 
   parts.push(

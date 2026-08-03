@@ -7,6 +7,7 @@ import { suggestionSchema } from "@/lib/schemas/suggestion";
 const bodySchema = z.object({
   suggestion: suggestionSchema,
   servings: z.number().int().min(1).max(12),
+  batch_cooking: z.boolean().nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
     const { recipe, generationId } = await generateRecipe(caller, {
       suggestion: parsed.data.suggestion,
       servings: parsed.data.servings,
+      batchCooking: parsed.data.batch_cooking,
     });
 
     return NextResponse.json({

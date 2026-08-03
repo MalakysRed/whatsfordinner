@@ -15,6 +15,7 @@ const bodySchema = z.object({
   previous: recipeSchema,
   servings: z.number().int().min(1).max(12),
   feedback: z.string().max(500).nullish(),
+  batch_cooking: z.boolean().nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
       servings: parsed.data.servings,
       feedback: parsed.data.feedback,
       previous: parsed.data.previous,
+      batchCooking: parsed.data.batch_cooking,
     });
 
     return NextResponse.json({

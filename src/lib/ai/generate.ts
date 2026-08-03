@@ -18,7 +18,12 @@ import {
   describeHits,
 } from "./guardrails/allergen";
 import { runGeneration } from "./client";
-import { buildRequestBlock, wrapUserText, type BuilderConstraints } from "./prompts/system";
+import {
+  BATCH_COOKING_INSTRUCTION,
+  buildRequestBlock,
+  wrapUserText,
+  type BuilderConstraints,
+} from "./prompts/system";
 import type { HouseholdContext } from "./prompts/context";
 import { isInBank, namesNotInBank } from "@/lib/generation/bank-match";
 import type { MealType } from "@/lib/db/types";
@@ -37,6 +42,7 @@ export async function generateFlavours(
     cuisine?: string | null;
     tasteProfile?: string[] | null;
     components: string[];
+    batchCooking?: boolean | null;
   },
 ) {
   const described = input.components.filter(Boolean).join(", ");
@@ -47,6 +53,7 @@ export async function generateFlavours(
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     described ? `CHOSEN SO FAR: ${described}` : null,
+    input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
     "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" Favour ones the household could actually make from their bank.",
   ]
     .filter(Boolean)
@@ -79,6 +86,7 @@ export async function generatePlateOptions(
     protein?: string | null;
     tasteProfile?: string[] | null;
     cuisine?: string | null;
+    batchCooking?: boolean | null;
   },
 ) {
   const requestBlock = [
@@ -87,6 +95,7 @@ export async function generatePlateOptions(
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     input.cuisine ? `CUISINE: ${input.cuisine}` : null,
+    input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
     "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.",
   ]
     .filter(Boolean)
@@ -203,6 +212,7 @@ export async function generateRecipe(
     feedback?: string | null;
     /** The card being revised, so the model can improve rather than restart. */
     previous?: Recipe | null;
+    batchCooking?: boolean | null;
   },
 ) {
   const { suggestion, servings } = input;
@@ -224,6 +234,10 @@ Mark each ingredient's scales value honestly: most things scale linearly, but sa
 
 Set in_bank to false for anything the household does not already have.`,
   ];
+
+  if (input.batchCooking) {
+    parts.push(BATCH_COOKING_INSTRUCTION);
+  }
 
   if (input.previous) {
     // Compact, not pretty-printed — the model doesn't need the indentation,

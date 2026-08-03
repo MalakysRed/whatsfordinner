@@ -51,6 +51,7 @@ export function RecipeCard({
   suggestion = null,
   unitPrefs = METRIC_PREFS,
   recipeId,
+  batchCooking,
   onSaved,
 }: {
   recipe: Recipe;
@@ -58,6 +59,8 @@ export function RecipeCard({
   unitPrefs?: UnitPrefs;
   /** The saved recipe's id, when there is one — keys cooking mode's ticked-step persistence. */
   recipeId?: string;
+  /** Carried through to the re-check/revise call (only relevant while `suggestion` is set). */
+  batchCooking?: boolean | null;
   /**
    * Fired if this card has to save the recipe itself in order to add it to
    * the shopping list (FR9.2) — lets a caller with its own "Save to book"
@@ -159,7 +162,13 @@ export function RecipeCard({
       const response = await fetch("/api/recipe/revise", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ suggestion, previous: recipe, servings, feedback: null }),
+        body: JSON.stringify({
+          suggestion,
+          previous: recipe,
+          servings,
+          feedback: null,
+          batch_cooking: batchCooking ?? null,
+        }),
       });
       const body = await response.json();
 
