@@ -68,6 +68,7 @@ export function Builder({
 
   const [timeLimit, setTimeLimit] = useState<number | null>(defaultTimeLimit);
   const [servings, setServings] = useState(defaultServings);
+  const [batchCooking, setBatchCooking] = useState(false);
   const [flavours, setFlavours] = useState<FlavourOption[] | null>(null);
   const [loadingFlavours, setLoadingFlavours] = useState(false);
   const [chosenFlavours, setChosenFlavours] = useState<string[]>([]);
@@ -474,6 +475,24 @@ export function Builder({
         </div>
       </Section>
 
+      <Section title="Batch cooking" summary={batchCooking ? "On" : "Off"}>
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={batchCooking}
+            onChange={(e) => setBatchCooking(e.target.checked)}
+            className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+          />
+          <span className="text-base">
+            Cooking in bulk to freeze portions
+            <span className="mt-0.5 block text-sm text-muted">
+              Rules out anything that freezes or reheats badly — fresh salads,
+              mayonnaise or cream sauces that split, soggy fried coatings.
+            </span>
+          </span>
+        </label>
+      </Section>
+
       {/* Sticky, because the page scrolls and the action should not. */}
       <div className="fixed inset-x-0 bottom-14 border-t border-line bg-raised/95 px-5 py-3 backdrop-blur">
         <div className="mx-auto w-full max-w-md">
@@ -491,6 +510,7 @@ export function Builder({
                 flavour_layers: chosenFlavours.length ? chosenFlavours : null,
                 time_limit: timeLimit,
                 servings,
+                batch_cooking: batchCooking || null,
               })
             }
             className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"

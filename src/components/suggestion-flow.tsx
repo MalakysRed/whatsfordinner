@@ -31,6 +31,7 @@ export interface Constraints {
   flavour_layers?: string[] | null;
   time_limit?: number | null;
   servings?: number | null;
+  batch_cooking?: boolean | null;
 }
 
 type Phase = "idle" | "suggesting" | "suggestions" | "cooking" | "recipe" | "error";

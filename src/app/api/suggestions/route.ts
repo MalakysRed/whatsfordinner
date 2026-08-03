@@ -19,6 +19,7 @@ const bodySchema = z.object({
   flavour_layers: z.array(z.string().max(120)).max(2).nullish(),
   time_limit: z.number().int().min(5).max(240).nullish(),
   servings: z.number().int().min(1).max(12).nullish(),
+  batch_cooking: z.boolean().nullish(),
   /** Free text from the refresh box. Treated as data, never as instruction. */
   feedback: z.string().max(500).nullish(),
   /** Titles rejected this session. */
@@ -147,6 +148,7 @@ export async function POST(request: NextRequest) {
         flavourLayers: body.flavour_layers,
         timeLimit: body.time_limit ?? caller.settings.meal_defaults?.dinner?.default_time_limit,
         servings: body.servings ?? caller.settings.meal_defaults?.dinner?.default_servings,
+        batchCooking: body.batch_cooking,
         feedback: body.feedback,
         avoidTitles: body.avoid_titles,
         newIdeaSlots: plan.newIdeaSlots,

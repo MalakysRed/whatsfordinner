@@ -193,6 +193,8 @@ export interface BuilderConstraints {
   avoidTitles?: string[] | null;
   /** How many genuinely new ideas to produce, after the recency quota. */
   newIdeaSlots?: number;
+  /** Cooking in bulk to freeze portions — rules out anything that freezes or reheats badly. */
+  batchCooking?: boolean | null;
 }
 
 /**
@@ -228,6 +230,12 @@ export function buildRequestBlock(constraints: BuilderConstraints): string {
 
   if (constraints.flavourLayers?.length) {
     parts.push(`FLAVOUR LAYER: ${constraints.flavourLayers.join(" and ")}`);
+  }
+
+  if (constraints.batchCooking) {
+    parts.push(
+      "BATCH COOKING: this will be cooked in bulk and frozen in portions, then reheated later. Every suggestion must freeze and reheat well — no dish built around fresh salad, mayonnaise or other emulsified sauces that split, cream sauces that split on reheating, fried or battered coatings that go soggy, or anything where boiled potatoes/pasta are the point rather than an incidental component. Favour stews, curries, braises, bolognese-style sauces, soups, casseroles, chillis and similar.",
+    );
   }
 
   parts.push(
