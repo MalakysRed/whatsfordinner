@@ -40,6 +40,7 @@ export async function generateFlavours(
   caller: Caller,
   input: {
     cuisine?: string | null;
+    dishType?: string | null;
     tasteProfile?: string[] | null;
     components: string[];
     batchCooking?: boolean | null;
@@ -49,12 +50,13 @@ export async function generateFlavours(
 
   const requestBlock = [
     input.cuisine ? `CUISINE: ${input.cuisine}` : null,
+    input.dishType ? `DISH TYPE: ${input.dishType}` : null,
     input.tasteProfile?.length
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     described ? `CHOSEN SO FAR: ${described}` : null,
     input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
-    "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" Favour ones the household could actually make from their bank.",
+    "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" These do not all need to be things the household already has — mix in some that would need a shop, so the options aren't the same handful of pantry staples every time.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -84,6 +86,7 @@ export async function generatePlateOptions(
   caller: Caller,
   input: {
     protein?: string | null;
+    dishType?: string | null;
     tasteProfile?: string[] | null;
     cuisine?: string | null;
     batchCooking?: boolean | null;
@@ -91,12 +94,13 @@ export async function generatePlateOptions(
 ) {
   const requestBlock = [
     input.protein ? `PROTEIN: ${input.protein}` : null,
+    input.dishType ? `DISH TYPE: ${input.dishType}` : null,
     input.tasteProfile?.length
       ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
       : null,
     input.cuisine ? `CUISINE: ${input.cuisine}` : null,
     input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
-    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.",
+    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.\n\nEach option must be a single plain ingredient on its own — no combinations, no seasoning or preparation attached. Write \"Carrots\", not \"Carrots with oregano butter\"; \"Wild rice\", not \"Wild rice pilaf\".",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -106,6 +110,17 @@ export async function generatePlateOptions(
     type: "plate",
     requestBlock,
     schema: plateOptionsResponseSchema,
+    validate: (response) => {
+      const offender = [...response.carbs, ...response.fats, ...response.veg].find((option) =>
+        looksLikeAPreparedDish(option.name),
+      );
+
+      if (offender) {
+        return `"${offender.name}" reads like a prepared dish, not a plain ingredient. Every option must be a single ingredient by itself — no combinations, no seasoning or preparation attached.`;
+      }
+
+      return null;
+    },
   });
 
   const withRealBank = <T extends { name: string }>(options: T[]) =>
@@ -117,6 +132,12 @@ export async function generatePlateOptions(
     veg: withRealBank(data.veg),
     generationId,
   };
+}
+
+/** Catches "Carrots with oregano butter" style responses a plain-ingredient prompt should never produce. */
+function looksLikeAPreparedDish(name: string): boolean {
+  if (name.trim().split(/\s+/).length > 3) return true;
+  return /\b(with|and|in|dressed|topped|glazed|marinated|drizzled)\b/i.test(name);
 }
 
 /** Every ingredient a suggestion actually names — the small, fixed set on `components`. */

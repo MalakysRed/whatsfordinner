@@ -177,6 +177,8 @@ export interface BuilderConstraints {
   /** Free text naming what must be used up (FR11). */
   needsUsingUp?: string | null;
   cuisine?: string | null;
+  /** Broad dish shape — curry, stew, pasta, and so on. */
+  dishType?: string | null;
   /** Multi-select: sweet, salty, sour, bitter, umami, spicy, plus free text. */
   tasteProfile?: string[] | null;
   protein?: string | null;
@@ -230,6 +232,8 @@ export function buildRequestBlock(constraints: BuilderConstraints): string {
   if (constraints.carb) frame.push(`Carb: ${constraints.carb}`);
   if (constraints.veg?.length) frame.push(`Vegetables: ${constraints.veg.join(", ")}`);
   if (frame.length > 0) parts.push(`PLATE:\n${frame.join("\n")}`);
+
+  if (constraints.dishType) parts.push(`DISH TYPE: ${constraints.dishType}`);
 
   if (constraints.cuisine) parts.push(`CUISINE: ${constraints.cuisine}`);
 

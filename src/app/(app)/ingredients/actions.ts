@@ -46,6 +46,24 @@ export async function updateIngredientFlags(formData: FormData): Promise<void> {
   revalidatePath("/ingredients");
 }
 
+/** Renaming doesn't touch anything else — recipes keep their own ingredient text (FR3.7's same reasoning). */
+export async function renameIngredient(formData: FormData): Promise<void> {
+  const session = await requireHouseholdSession();
+  const id = String(formData.get("id") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+
+  if (!name) return;
+
+  const supabase = await createClient();
+  await supabase
+    .from("ingredients")
+    .update({ name })
+    .eq("id", id)
+    .eq("household_id", session.householdId);
+
+  revalidatePath("/ingredients");
+}
+
 /**
  * FR3.7 — deleting an ingredient must not break saved recipes. It cannot:
  * recipes keep their own ingredient text in the payload rather than pointing at

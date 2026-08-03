@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Card, Pill } from "@/components/ui";
 import { CATEGORY_LABELS, INGREDIENT_CATEGORIES } from "@/lib/db/types";
 import type { IngredientCategory, IngredientRow } from "@/lib/db/types";
-import { deleteIngredient, updateIngredientFlags } from "./actions";
+import { deleteIngredient, renameIngredient, updateIngredientFlags } from "./actions";
 
 type SortBy = "name" | "most_used";
 
@@ -103,6 +103,23 @@ export function IngredientList({ ingredients }: { ingredients: IngredientRow[] }
                     {CATEGORY_LABELS[ingredient.category]}
                     {ingredient.typical_unit && ` · usually in ${ingredient.typical_unit}`}
                   </p>
+
+                  <form action={renameIngredient} className="flex gap-2">
+                    <input type="hidden" name="id" value={ingredient.id} />
+                    <input
+                      name="name"
+                      defaultValue={ingredient.name}
+                      maxLength={80}
+                      aria-label={`Rename ${ingredient.name}`}
+                      className="min-h-11 flex-1 rounded-xl border border-line bg-background px-3 py-2 text-base outline-none focus:border-accent"
+                    />
+                    <button
+                      type="submit"
+                      className="min-h-11 shrink-0 rounded-xl border border-line px-4 py-2 text-sm font-medium"
+                    >
+                      Rename
+                    </button>
+                  </form>
 
                   <form action={updateIngredientFlags} className="space-y-3">
                     <input type="hidden" name="id" value={ingredient.id} />

@@ -23,6 +23,7 @@ type SuggestionWithBook = Suggestion & {
 export interface Constraints {
   needs_using_up?: string | null;
   cuisine?: string | null;
+  dish_type?: string | null;
   taste_profile?: string[] | null;
   protein?: string | null;
   fat?: string | null;

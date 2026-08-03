@@ -51,13 +51,14 @@ export type SuggestionsResponse = z.infer<typeof suggestionsResponseSchema>;
 
 /** Six to eight named flavour layers for the builder (PRD 7.2.5). */
 export const flavourOptionSchema = z.object({
-  name: z.string(),
+  name: z.string().max(40),
   /** "Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot." */
-  description: z.string(),
+  description: z.string().max(110),
 });
 
+/** Capped at what the prompt actually asks for (six to eight) — a ceiling, not the target count. */
 export const flavoursResponseSchema = z.object({
-  flavours: z.array(flavourOptionSchema),
+  flavours: z.array(flavourOptionSchema).max(8),
 });
 
 export type FlavourOption = z.infer<typeof flavourOptionSchema>;
@@ -70,7 +71,7 @@ export type FlavourOption = z.infer<typeof flavourOptionSchema>;
  * not offer them back.
  */
 export const plateOptionSchema = z.object({
-  name: z.string(),
+  name: z.string().max(40),
   in_bank: z.boolean(),
 });
 

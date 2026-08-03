@@ -15,6 +15,11 @@ export const CUISINES = [
 
 const TASTE_PROFILES = ["Sweet", "Salty", "Sour", "Bitter", "Umami", "Spicy"];
 
+const DISH_TYPES = [
+  "Curry", "Stew", "Soup", "Casserole", "Pasta", "Pizza", "Stir-fry",
+  "Traybake", "Salad", "Sandwich", "Rice bowl", "Noodles", "Roast", "Bake",
+];
+
 const PROTEIN_CATEGORIES: IngredientCategory[] = ["animal_protein", "plant_protein"];
 
 export interface BankIngredient {
@@ -33,11 +38,12 @@ export interface BankIngredient {
  * imply the length of the job. "Needs using up" sits first because it is the
  * strongest constraint when it applies and invisible when it does not.
  *
- * Order: needs using up, protein, flavour profile (taste + cuisine), a Haiku
- * call for the rest of the plate, the plate itself, a second Haiku call for
- * flavour layers, then time and servings before the Sonnet suggestions call.
- * Protein, taste profile and cuisine all carry through as real constraints on
- * that final call, not just scaffolding for the plate step.
+ * Order: needs using up, protein, flavour profile (dish type, then taste,
+ * then cuisine — broadest to most specific), a Haiku call for the rest of
+ * the plate, the plate itself, a second Haiku call for flavour layers, then
+ * time and servings before the Sonnet suggestions call. Protein, dish type,
+ * taste profile and cuisine all carry through as real constraints on that
+ * final call, not just scaffolding for the plate step.
  */
 export function Builder({
   bankIngredients,
@@ -54,6 +60,7 @@ export function Builder({
 }) {
   const [needsUsingUp, setNeedsUsingUp] = useState("");
   const [protein, setProtein] = useState("");
+  const [dishType, setDishType] = useState<string | null>(null);
   const [tasteProfile, setTasteProfile] = useState<string[]>([]);
   const [tasteProfileOther, setTasteProfileOther] = useState("");
   const [cuisine, setCuisine] = useState<string | null>(null);
@@ -121,7 +128,7 @@ export function Builder({
   }, [needsUsingUp, bankNames]);
 
   const canPickPlate =
-    Boolean(protein) || Boolean(cuisine) || effectiveTasteProfile.length > 0;
+    Boolean(protein) || Boolean(cuisine) || Boolean(dishType) || effectiveTasteProfile.length > 0;
 
   const canPickFlavour =
     canPickPlate && Boolean(carb || fat || veg.length);
@@ -136,6 +143,7 @@ export function Builder({
           protein: protein || null,
           taste_profile: effectiveTasteProfile.length ? effectiveTasteProfile : null,
           cuisine,
+          dish_type: dishType,
           batch_cooking: batchCooking || null,
         }),
       });
@@ -160,6 +168,7 @@ export function Builder({
           cuisine,
           taste_profile: effectiveTasteProfile.length ? effectiveTasteProfile : null,
           components: [protein, carb, fat, ...veg].filter(Boolean),
+          dish_type: dishType,
           batch_cooking: batchCooking || null,
         }),
       });
@@ -191,7 +200,7 @@ export function Builder({
   }
 
   const flavourProfileSummary =
-    [effectiveTasteProfile.join(", "), cuisine].filter(Boolean).join(" · ") ||
+    [dishType, effectiveTasteProfile.join(", "), cuisine].filter(Boolean).join(" · ") ||
     "You choose";
 
   const plateSummary = [carb, fat, ...veg].filter(Boolean).join(", ") || "You choose";
@@ -275,6 +284,32 @@ export function Builder({
 
       <Section title="Flavour profile" summary={flavourProfileSummary}>
         <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Dish profile</p>
+            <div className="flex flex-wrap gap-2">
+              {DISH_TYPES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setDishType(dishType === option ? null : option)}
+                  className={`min-h-11 rounded-full border px-3.5 py-2 text-sm font-medium ${
+                    dishType === option
+                      ? "border-accent bg-accent text-on-accent"
+                      : "border-line bg-background"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <input
+              value={DISH_TYPES.includes(dishType ?? "") ? "" : (dishType ?? "")}
+              onChange={(e) => setDishType(e.target.value || null)}
+              placeholder="or type another"
+              className="w-full rounded-xl border border-line bg-background px-4 py-3 text-base outline-none focus:border-accent"
+            />
+          </div>
+
           <div className="space-y-2">
             <p className="text-sm font-medium">Taste profile</p>
             <div className="flex flex-wrap gap-2">
@@ -506,6 +541,7 @@ export function Builder({
               setSubmitted({
                 needs_using_up: needsUsingUp || null,
                 cuisine,
+                dish_type: dishType,
                 taste_profile: effectiveTasteProfile.length ? effectiveTasteProfile : null,
                 protein: protein || null,
                 carb: carb || null,
