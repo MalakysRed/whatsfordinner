@@ -404,6 +404,9 @@ export async function createInvite(
 
   if (inviteEmailError) {
     if (inviteEmailError.code !== "email_exists") {
+      console.error(
+        `createInvite: inviteUserByEmail failed (code=${inviteEmailError.code}, status=${inviteEmailError.status}): ${inviteEmailError.message}`,
+      );
       return {
         status: "error",
         message: "The invite was created but the email could not be sent. Try again.",
@@ -419,6 +422,9 @@ export async function createInvite(
     });
 
     if (otpError) {
+      console.error(
+        `createInvite: signInWithOtp fallback failed (code=${otpError.code}, status=${otpError.status}): ${otpError.message}`,
+      );
       return {
         status: "error",
         message: "The invite was created but the email could not be sent. Try again.",
