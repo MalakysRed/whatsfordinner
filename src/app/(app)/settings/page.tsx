@@ -22,6 +22,7 @@ import {
   saveHouseholdName,
   saveMeasurements,
   saveShopping,
+  signOut,
 } from "./actions";
 
 export default async function SettingsPage() {
@@ -427,6 +428,17 @@ export default async function SettingsPage() {
             </SaveForm>
           )}
         </div>
+      </Section>
+
+      <Section title="Account">
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="w-full rounded-xl border border-line bg-raised px-4 py-3 text-center text-base font-medium"
+          >
+            Sign out
+          </button>
+        </form>
       </Section>
     </div>
   );

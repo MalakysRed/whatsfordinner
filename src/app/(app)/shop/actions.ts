@@ -279,6 +279,18 @@ export async function removeRecipeFromList(recipeId: string): Promise<ActionResu
   return { ok: true };
 }
 
+/** Empties the active list without archiving it — same list, no items. */
+export async function clearActiveList(listId: string): Promise<ActionResult> {
+  await requireHouseholdSession();
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("list_items").delete().eq("list_id", listId);
+  if (error) return { ok: false, error: "Could not clear the list." };
+
+  revalidatePath("/shop");
+  return { ok: true };
+}
+
 /** Completes the active list; the next add starts a fresh one (FR9.1). */
 export async function archiveActiveList(listId: string): Promise<ActionResult> {
   await requireHouseholdSession();

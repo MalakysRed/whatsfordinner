@@ -67,9 +67,8 @@ export async function requestMagicLink(
   if (!allowed) return genericSuccess;
 
   const origin = (await headers()).get("origin") ?? "";
-  const redirectTo = `${origin}/auth/confirm${
-    next ? `?next=${encodeURIComponent(next)}` : ""
-  }`;
+  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const redirectTo = `${origin}${safeNext}`;
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({

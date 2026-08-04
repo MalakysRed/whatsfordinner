@@ -133,10 +133,34 @@ pnpm setup:allowlist  # seed signup_allowlist from BOOTSTRAP_SIGNUP_EMAILS
 First run against a hosted project: `supabase link --project-ref <ref>`,
 `supabase db push`, `pnpm setup:allowlist`. Then in the dashboard set Auth → URL
 Configuration (Site URL plus `/auth/confirm` and `/auth/confirm?next=*` as
-redirect URLs) and override the magic-link email template to
-`{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` — the stock
-template uses a flow `/auth/confirm` does not implement, and every link will
-bounce to `/login?error=link_invalid` until it is changed.
+redirect URLs) and override **both** the magic-link and the invite email
+templates to
+`{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next={{ .RedirectTo }}`
+and
+`{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite&next={{ .RedirectTo }}`
+respectively — the stock templates use a flow `/auth/confirm` does not
+implement, and every link will bounce to `/login?error=link_invalid` until
+both are changed. Inviting someone from Settings uses the invite template;
+signing in uses the magic-link one.
+
+**The `&next={{ .RedirectTo }}` part is not optional.** Every call site passes
+`emailRedirectTo`/`redirectTo` as the actual page to land on afterwards (e.g.
+`/invite/<token>` for an invite, whatever page bounced the visitor to `/login`
+for a magic link) — never a pre-built `/auth/confirm?...` URL, because the
+template is what builds that URL, and it only knows the destination if the
+template forwards `{{ .RedirectTo }}` itself. Leave that out of either
+template and `next` silently disappears: `/auth/confirm` defaults to `/`, an
+invited user lands on the home page instead of `/invite/<token>`, never calls
+`accept_invite`, and ends up creating their own separate household on
+`/welcome` instead of joining yours — two households, nothing shared, no
+error anywhere to point at why.
+
+If Auth → SMTP Settings points at Resend (or any provider) in sandbox/test
+mode, every email to anyone other than the account's own verified address
+silently 500s server-side — Resend's own dashboard logs it, Supabase's Auth
+Logs show it, but the client only ever sees an opaque failure. Verify a
+domain at resend.com/domains and point the SMTP sender address at it before
+assuming invites (or magic links to anyone but the owner) are broken code.
 
 ## Conventions
 

@@ -1,8 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { requireHouseholdSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   displayNameSchema,
   generationSchema,
@@ -325,7 +328,20 @@ export async function saveHouseholdName(
   return { status: "saved" };
 }
 
-/** FR1.3 — a 7 day invite link. Owner only. */
+/**
+ * FR1.3 — a 7 day invite link, emailed to the invitee.
+ *
+ * `create_invite` only writes the database row and allowlists the email; it
+ * has no way to send mail itself. Delivery happens here, via the same
+ * Supabase project that already emails magic links, so no separate email
+ * provider is needed. A brand new address gets Supabase's "invite" template
+ * (`inviteUserByEmail`, which also creates their `auth.users` row up front);
+ * an address that already has an account can't be invited that way — Supabase
+ * refuses with `email_exists` — so that case falls back to an ordinary
+ * sign-in link, same as the login form sends.
+ *
+ * Owner only.
+ */
 export async function createInvite(
   _prev: ActionResult,
   formData: FormData,
@@ -339,7 +355,7 @@ export async function createInvite(
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("create_invite", { invite_email: email });
+  const { data: token, error } = await supabase.rpc("create_invite", { invite_email: email });
 
   if (error) {
     if (error.message.includes("invalid_email")) {
@@ -348,6 +364,50 @@ export async function createInvite(
     return { status: "error", message: "Could not create the invite." };
   }
 
+  const origin = (await headers()).get("origin") ?? "";
+  const redirectTo = `${origin}/invite/${token}`;
+
+  const admin = createAdminClient();
+  const { error: inviteEmailError } = await admin.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+  });
+
+  if (inviteEmailError) {
+    if (inviteEmailError.code !== "email_exists") {
+      console.error(
+        `createInvite: inviteUserByEmail failed (code=${inviteEmailError.code}, status=${inviteEmailError.status}): ${inviteEmailError.message}`,
+      );
+      return {
+        status: "error",
+        message: "The invite was created but the email could not be sent. Try again.",
+      };
+    }
+
+    // Already has an account — Supabase won't send an "invite" email to an
+    // existing user, but a normal sign-in link lands them on the same
+    // acceptance page just as well.
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+
+    if (otpError) {
+      console.error(
+        `createInvite: signInWithOtp fallback failed (code=${otpError.code}, status=${otpError.status}): ${otpError.message}`,
+      );
+      return {
+        status: "error",
+        message: "The invite was created but the email could not be sent. Try again.",
+      };
+    }
+  }
+
   revalidatePath("/settings");
   return { status: "saved" };
+}
+
+export async function signOut() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  redirect("/login");
 }

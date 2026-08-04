@@ -6,7 +6,13 @@ import { Button, Card, EmptyState, Input, Pill } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
 import { roundForDisplay } from "@/lib/recipe/scale";
 import { buildCoworkExport, downloadCoworkExport, type CoworkSettings } from "@/lib/shopping/cowork";
-import { addManualItem, archiveActiveList, removeListItem, toggleItemTicked } from "./actions";
+import {
+  addManualItem,
+  archiveActiveList,
+  clearActiveList,
+  removeListItem,
+  toggleItemTicked,
+} from "./actions";
 import type { ShopListItem } from "./page";
 
 /**
@@ -31,6 +37,7 @@ export function ShoppingList({
   const [manualAmount, setManualAmount] = useState("");
   const [manualUnit, setManualUnit] = useState("");
   const [archiving, setArchiving] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -97,6 +104,16 @@ export function ShoppingList({
     }
   }
 
+  async function onClear() {
+    setClearing(true);
+    setItems([]);
+    try {
+      await clearActiveList(listId);
+    } finally {
+      setClearing(false);
+    }
+  }
+
   function onExport() {
     const text = buildCoworkExport(
       items.map((i) => ({ item: i.item, amount: i.amount, unit: i.unit })),
@@ -117,7 +134,12 @@ export function ShoppingList({
 
   return (
     <div className="space-y-4 pb-8">
-      <Card className="flex items-center justify-end gap-3 p-4">
+      <Card className="flex items-center justify-end gap-2 p-4">
+        {items.length > 0 && (
+          <Button type="button" variant="secondary" onClick={() => void onClear()} disabled={clearing}>
+            {clearing ? "Clearing…" : "Empty list"}
+          </Button>
+        )}
         <Button type="button" variant="secondary" onClick={() => void onArchive()} disabled={archiving}>
           {archiving ? "Archiving…" : "Done shopping"}
         </Button>

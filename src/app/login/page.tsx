@@ -7,9 +7,20 @@ import { requestMagicLink, type LoginState } from "./actions";
 
 const initialState: LoginState = { status: "idle" };
 
+function linkErrorMessage(error: string | null): string | null {
+  if (error === "link_invalid") {
+    return "That link was not valid. Request a new one below.";
+  }
+  if (error === "link_expired") {
+    return "That link has expired or was already used. Request a new one below.";
+  }
+  return null;
+}
+
 function LoginForm() {
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "";
+  const linkError = linkErrorMessage(searchParams.get("error"));
   const [state, formAction, pending] = useActionState(requestMagicLink, initialState);
 
   return (
@@ -47,10 +58,16 @@ function LoginForm() {
             />
           </div>
 
-          {state.status === "error" && (
+          {state.status === "error" ? (
             <p role="alert" className="text-sm text-danger">
               {state.message}
             </p>
+          ) : (
+            linkError && (
+              <p role="alert" className="text-sm text-danger">
+                {linkError}
+              </p>
+            )
           )}
 
           <button
