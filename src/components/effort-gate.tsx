@@ -5,10 +5,12 @@ import { Card } from "@/components/ui";
 import type { EffortInput } from "@/components/option-flow";
 
 /**
- * Stage 1 — the single input gate (feature spec §4). One tap for effort
- * band, one optional free-text field. Nothing else is asked before
- * generation: cuisine, protein and ingredient filters live in stage 2, as
- * filters on the results, not constraints on the request.
+ * Stage 1 — the input gate. One tap for effort band, an optional main
+ * ingredient (a real constraint on stage 2, not a nudge — see
+ * generate.ts's `buildOptionsRequestBlock`), and an optional "anything to
+ * use up?" field. Nothing else is asked before generation: cuisine and
+ * ingredient filters live downstream, as reactions to what comes back, not
+ * constraints on the request.
  */
 
 const BANDS: { value: EffortInput["effortBand"]; label: string; detail: string }[] = [
@@ -19,6 +21,7 @@ const BANDS: { value: EffortInput["effortBand"]; label: string; detail: string }
 
 export function EffortGate({ onSubmit }: { onSubmit: (input: EffortInput) => void }) {
   const [band, setBand] = useState<EffortInput["effortBand"] | null>(null);
+  const [mainIngredient, setMainIngredient] = useState("");
   const [needsUsingUp, setNeedsUsingUp] = useState("");
 
   return (
@@ -40,6 +43,22 @@ export function EffortGate({ onSubmit }: { onSubmit: (input: EffortInput) => voi
       </div>
 
       <Card className="space-y-2 p-4">
+        <label htmlFor="main-ingredient" className="block text-sm font-medium">
+          Main ingredient (optional)
+        </label>
+        <input
+          id="main-ingredient"
+          value={mainIngredient}
+          onChange={(e) => setMainIngredient(e.target.value)}
+          placeholder="chicken"
+          className="w-full rounded-xl border border-line bg-background px-4 py-3 text-base outline-none focus:border-accent"
+        />
+        <p className="text-sm text-muted">
+          If you set this, all six options will be built around it.
+        </p>
+      </Card>
+
+      <Card className="space-y-2 p-4">
         <label htmlFor="needs-using-up" className="block text-sm font-medium">
           Anything to use up? (optional)
         </label>
@@ -55,7 +74,14 @@ export function EffortGate({ onSubmit }: { onSubmit: (input: EffortInput) => voi
       <button
         type="button"
         disabled={!band}
-        onClick={() => band && onSubmit({ effortBand: band, needsUsingUp: needsUsingUp.trim() || null })}
+        onClick={() =>
+          band &&
+          onSubmit({
+            effortBand: band,
+            mainIngredient: mainIngredient.trim() || null,
+            needsUsingUp: needsUsingUp.trim() || null,
+          })
+        }
         className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent disabled:opacity-50"
       >
         Show me options

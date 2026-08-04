@@ -22,7 +22,7 @@ export interface DrawnSeed {
 }
 
 /**
- * One seed per axis, drawn from the active pool.
+ * One seed per requested axis, drawn from the active pool.
  *
  * Cuisine and hero are weighted by season: a row tagged for the current
  * season is twice as likely to be drawn as an all-year row, but a row tagged
@@ -31,6 +31,10 @@ export interface DrawnSeed {
  * "slow braise" seed offered against a "quick" effort band would contradict
  * the one thing stage 1 actually asked for. Anything drawn in the household's
  * last three generations is excluded outright either way (spec §5.1a).
+ *
+ * `axes` defaults to all three; the caller drops `hero` when a main
+ * ingredient has already been pinned by the user — a hero seed would just
+ * compete with it rather than add inspiration.
  */
 export function drawSeeds(
   pool: SeedPoolRow[],
@@ -38,9 +42,8 @@ export function drawSeeds(
   effortBand: EffortBand,
   excludedNames: ReadonlySet<string>,
   random: () => number = Math.random,
+  axes: SeedAxis[] = ["cuisine", "format", "hero"],
 ): DrawnSeed[] {
-  const axes: SeedAxis[] = ["cuisine", "format", "hero"];
-
   return axes
     .map((axis) => drawOne(pool, axis, season, effortBand, excludedNames, random))
     .filter((seed): seed is DrawnSeed => seed !== null);
@@ -81,12 +84,25 @@ function drawOne(
  * is the floor that stops "six variations on one idea"; the model is also
  * instructed to vary richness, which is harder to check mechanically and is
  * left to the prompt.
+ *
+ * `ignoreProtein` drops protein from the comparison — used when a main
+ * ingredient has been pinned, since all six options share it by design and
+ * the collision check would otherwise trip on the very field the user chose.
  */
-export function findAxesCollisions(optionAxes: OptionAxes[]): number[][] {
+export function findAxesCollisions(
+  optionAxes: OptionAxes[],
+  { ignoreProtein = false }: { ignoreProtein?: boolean } = {},
+): number[][] {
   const seen = new Map<string, number[]>();
 
   optionAxes.forEach((axes, index) => {
-    const key = `${normaliseToken(axes.protein)}|${normaliseToken(axes.method)}|${normaliseToken(axes.cuisine)}`;
+    const key = [
+      ignoreProtein ? null : normaliseToken(axes.protein),
+      normaliseToken(axes.method),
+      normaliseToken(axes.cuisine),
+    ]
+      .filter((part): part is string => part !== null)
+      .join("|");
     seen.set(key, [...(seen.get(key) ?? []), index]);
   });
 

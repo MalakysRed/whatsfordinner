@@ -70,6 +70,19 @@ describe("drawSeeds", () => {
 
     expect(drawn.find((s) => s.axis === "hero")?.name).toBe("Squash");
   });
+
+  it("skips the hero axis when the caller only requests cuisine and format", () => {
+    const pool: SeedPoolRow[] = [
+      seed({ axis: "cuisine", name: "Thai" }),
+      seed({ axis: "format", name: "Traybake", tags: ["standard"] }),
+      seed({ axis: "hero", name: "Squash", tags: ["autumn"] }),
+    ];
+
+    // A main ingredient is pinned, so the caller drops "hero" from the axes list.
+    const drawn = drawSeeds(pool, "autumn", "standard", new Set(), Math.random, ["cuisine", "format"]);
+
+    expect(drawn.map((s) => s.axis).sort()).toEqual(["cuisine", "format"]);
+  });
 });
 
 function axes(overrides: Partial<OptionAxes> = {}): OptionAxes {
@@ -90,6 +103,18 @@ describe("findAxesCollisions", () => {
 
   it("does not flag options that differ on just one of the three axes", () => {
     expect(findAxesCollisions([axes(), axes({ cuisine: "Italian" })])).toEqual([]);
+  });
+
+  it("with ignoreProtein, does not flag options that share a protein but differ on method or cuisine", () => {
+    // A pinned main ingredient means every option shares a protein by design —
+    // the collision check must not trip on the field the user chose.
+    const shared = [axes({ method: "roast" }), axes({ method: "braise" })];
+    expect(findAxesCollisions(shared, { ignoreProtein: true })).toEqual([]);
+  });
+
+  it("with ignoreProtein, still flags options identical on method and cuisine alone", () => {
+    const identical = [axes({ protein: "chicken" }), axes({ protein: "tofu" })];
+    expect(findAxesCollisions(identical, { ignoreProtein: true })).toEqual([[0, 1]]);
   });
 });
 

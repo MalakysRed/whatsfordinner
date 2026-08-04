@@ -2,13 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { generateRecipe } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
-import { optionSchema } from "@/lib/schemas/option";
+import { refinedOptionSchema } from "@/lib/schemas/dish-variations";
 
 const bodySchema = z.object({
-  option: optionSchema,
+  option: refinedOptionSchema,
   servings: z.number().int().min(1).max(12),
-  /** Chosen values from the committed option's own `swaps` array, keyed by slot. */
-  swap_selections: z.record(z.string(), z.string()).nullish(),
+  /** The stage-3 tailoring choices that shaped the chosen variation. */
+  component_selections: z.record(z.string(), z.string()).nullish(),
+  main_ingredient: z.string().max(80).nullish(),
+  needs_using_up: z.string().max(500).nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -26,7 +28,9 @@ export async function POST(request: NextRequest) {
     const { recipe, generationId } = await generateRecipe(caller, {
       option: parsed.data.option,
       servings: parsed.data.servings,
-      swapSelections: parsed.data.swap_selections,
+      componentSelections: parsed.data.component_selections,
+      mainIngredient: parsed.data.main_ingredient,
+      needsUsingUp: parsed.data.needs_using_up,
     });
 
     return NextResponse.json({

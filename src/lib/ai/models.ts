@@ -72,6 +72,11 @@ export const MODEL_FOR_CALL: Record<GenerationType, ModelKey> = {
   recipe: "sonnet",
   options: "haiku",
   options_refine: "haiku",
+  // Stage 3 (tailoring) is a cheap, per-dish call. Stage 4 (three richer
+  // variations) moves up to Sonnet — close enough to a real dish that a
+  // cheap model's looseness starts to show, per the household's own testing.
+  dish_components: "haiku",
+  dish_variations: "sonnet",
 };
 
 /**
@@ -88,9 +93,14 @@ export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> 
   flavour: "low",
   plate: "low",
   suggestions: "low",
-  recipe: "medium",
+  // Raised from "medium": stage 4 hands the recipe call an already-chosen,
+  // fully-specified dish, so the remaining work is entirely about getting
+  // quantities, timings and method right — worth spending on.
+  recipe: "high",
   options: "low",
   options_refine: "low",
+  dish_components: "low",
+  dish_variations: "low",
 };
 
 /**
@@ -102,11 +112,16 @@ export const MAX_TOKENS_FOR_CALL: Record<GenerationType, number> = {
   flavour: 4_000,
   plate: 4_000,
   suggestions: 12_000,
-  recipe: 20_000,
-  // Six cards with swaps and technique tags each — noticeably larger than the
-  // old three-suggestion response.
-  options: 16_000,
-  options_refine: 16_000,
+  // Headroom for high effort's larger thinking budget, on top of the visible
+  // output.
+  recipe: 24_000,
+  // Six lightweight cards — title, description, a handful of short fields.
+  options: 8_000,
+  options_refine: 8_000,
+  // A handful of slots, each a short list of named options — cheap either way.
+  dish_components: 6_000,
+  // Three richer cards with hero ingredients and flavour notes.
+  dish_variations: 10_000,
 };
 
 export interface TokenUsage {

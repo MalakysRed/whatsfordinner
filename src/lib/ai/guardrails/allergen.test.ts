@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkDishComponentsForAllergens,
   checkOptionForAllergens,
   checkRecipeForAllergens,
+  checkRefinedOptionForAllergens,
   expandAllergenTerms,
 } from "./allergen";
 import type { Recipe } from "@/lib/schemas/recipe";
 import type { Option } from "@/lib/schemas/option";
+import type { DishComponentsResponse } from "@/lib/schemas/dish-components";
+import type { RefinedOption } from "@/lib/schemas/dish-variations";
 
 function recipe(overrides: Partial<Recipe> = {}): Recipe {
   return {
@@ -50,18 +54,47 @@ function option(overrides: Partial<Option> = {}): Option {
     id: "o1",
     title: "Charred greens with tahini",
     description: "Quick, sharp, and mostly from the cupboard.",
+    cuisine: "Middle Eastern",
     effort_minutes: 25,
-    key_ingredients: ["chickpeas", "tenderstem broccoli", "tahini"],
     axes: {
       protein: "chickpeas",
       method: "griddle",
       cuisine: "Middle Eastern",
       richness: "light",
     },
-    swaps: [],
-    techniques: ["griddle"],
-    max_technique_tier: 2,
-    difficulty_score: null,
+    uses_named_ingredients: [],
+    ...overrides,
+  };
+}
+
+function dishComponents(
+  overrides: Partial<DishComponentsResponse> = {},
+): DishComponentsResponse {
+  return {
+    slots: [
+      {
+        slot: "vegetable",
+        label: "Vegetables",
+        options: [
+          { name: "Tenderstem broccoli", note: "Holds up to a hot griddle." },
+          { name: "Charred courgette", note: null },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function refinedOption(overrides: Partial<RefinedOption> = {}): RefinedOption {
+  return {
+    id: "r1",
+    title: "Charred greens with tahini and pickled chilli",
+    description: "Sharp, smoky, mostly from the cupboard.",
+    hero_ingredients: ["chickpeas", "tenderstem broccoli", "tahini"],
+    flavours: ["smoky", "sharp"],
+    cuisine: "Middle Eastern",
+    effort_minutes: 25,
+    uses_named_ingredients: [],
     ...overrides,
   };
 }
@@ -255,10 +288,9 @@ describe("checkRecipeForAllergens", () => {
 
 describe("checkOptionForAllergens", () => {
   // Catching it here saves generating a card that would be thrown away.
-  it("catches an allergen in an option's key ingredients", () => {
+  it("catches an allergen in the protein axis", () => {
     const hits = checkOptionForAllergens(
       option({
-        key_ingredients: ["king prawns", "olive oil", "rice", "pak choi"],
         axes: { protein: "king prawns", method: "stir fry", cuisine: "Cantonese", richness: "light" },
       }),
       ["shellfish"],
@@ -267,18 +299,80 @@ describe("checkOptionForAllergens", () => {
     expect(hits.length).toBeGreaterThan(0);
   });
 
-  it("catches an allergen in a swap's safe options", () => {
+  it("catches an allergen in uses_named_ingredients", () => {
     const hits = checkOptionForAllergens(
-      option({
-        swaps: [{ slot: "protein", safe_options: ["prawns", "squid"], note: "both work in this braise" }],
-      }),
-      ["shellfish"],
+      option({ uses_named_ingredients: ["peanut butter"] }),
+      ["peanuts"],
     );
 
-    expect(hits.map((h) => h.location)).toContain("swaps[0].safe_options[0]");
+    expect(hits.map((h) => h.location)).toContain("uses_named_ingredients[0]");
   });
 
   it("passes a clean option", () => {
     expect(checkOptionForAllergens(option(), ["peanuts"])).toEqual([]);
+  });
+});
+
+describe("checkDishComponentsForAllergens", () => {
+  it("catches an allergen in a slot option's name", () => {
+    const hits = checkDishComponentsForAllergens(
+      dishComponents({
+        slots: [
+          {
+            slot: "sauce",
+            label: "Sauce",
+            options: [{ name: "Peanut satay sauce", note: null }],
+          },
+        ],
+      }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("slots[0].options[0].name");
+  });
+
+  it("catches an allergen hidden in a pairing note", () => {
+    const hits = checkDishComponentsForAllergens(
+      dishComponents({
+        slots: [
+          {
+            slot: "sauce",
+            label: "Sauce",
+            options: [{ name: "Green sauce", note: "Finished with shaved parmesan." }],
+          },
+        ],
+      }),
+      ["dairy"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("slots[0].options[0].note");
+  });
+
+  it("passes clean components", () => {
+    expect(checkDishComponentsForAllergens(dishComponents(), ["peanuts"])).toEqual([]);
+  });
+});
+
+describe("checkRefinedOptionForAllergens", () => {
+  it("catches an allergen in hero_ingredients", () => {
+    const hits = checkRefinedOptionForAllergens(
+      refinedOption({ hero_ingredients: ["king prawns", "rice"] }),
+      ["shellfish"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("hero_ingredients[0]");
+  });
+
+  it("catches an allergen in flavours", () => {
+    const hits = checkRefinedOptionForAllergens(
+      refinedOption({ flavours: ["peanut", "sharp"] }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("flavours[0]");
+  });
+
+  it("passes a clean refined option", () => {
+    expect(checkRefinedOptionForAllergens(refinedOption(), ["peanuts"])).toEqual([]);
   });
 });

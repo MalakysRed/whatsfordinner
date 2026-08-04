@@ -6,24 +6,37 @@ import { Card } from "@/components/ui";
 import { RecipeCard } from "@/components/recipe-card";
 import { saveRecipe } from "@/app/(app)/book/actions";
 import { formatMinutes } from "@/lib/recipe/render";
-import { CUISINES } from "@/lib/cuisines";
 import type { UnitPrefs } from "@/lib/recipe/scale";
 import type { Recipe } from "@/lib/schemas/recipe";
 import type { Option } from "@/lib/schemas/option";
+import type { ComponentSlot } from "@/lib/schemas/dish-components";
+import type { RefinedOption } from "@/lib/schemas/dish-variations";
 
 export interface EffortInput {
   effortBand: "quick" | "standard" | "project";
+  /** Pinned at stage 1 — a hard constraint on stage 2, not a nudge. */
+  mainIngredient?: string | null;
   /** Free text from stage 1, "anything to use up?" — never persisted. */
   needsUsingUp?: string | null;
 }
 
-type Phase = "generating" | "options" | "commit" | "cooking" | "recipe" | "error";
+type Phase =
+  | "loading-options"
+  | "options"
+  | "loading-tailor"
+  | "tailor"
+  | "loading-variations"
+  | "variations"
+  | "cooking"
+  | "recipe"
+  | "error";
 
 /**
- * Stages 2–4 of the feature spec: six options, react or commit, tailor with
- * pre-validated swaps, then the recipe card. No free-text mutation path once
- * a dish is committed — everything offered on the commit screen comes
- * straight from that option's own `swaps` array (spec §6).
+ * Stages 2 through 5: six lightweight options, tailor the chosen one, three
+ * richer variations informed by that tailoring, then the recipe card. No
+ * free-text mutation path once a dish is committed — everything offered on
+ * the way there is either the household's own tap or something the model
+ * generated in response to it.
  */
 export function OptionFlow({
   input,
@@ -34,27 +47,46 @@ export function OptionFlow({
   defaultServings: number;
   unitPrefs?: UnitPrefs;
 }) {
-  const [phase, setPhase] = useState<Phase>("generating");
-  const [options, setOptions] = useState<Option[]>([]);
+  const [phase, setPhase] = useState<Phase>("loading-options");
   const [error, setError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
-  const [cuisineFilter, setCuisineFilter] = useState<string | null>(null);
 
-  const [committed, setCommitted] = useState<Option | null>(null);
+  const [options, setOptions] = useState<Option[]>([]);
+  const [chosenOption, setChosenOption] = useState<Option | null>(null);
+
+  const [slots, setSlots] = useState<ComponentSlot[]>([]);
+  const [selections, setSelections] = useState<Record<string, string>>({});
+  const [lastChangedSlot, setLastChangedSlot] = useState<string | null>(null);
+
+  const [variations, setVariations] = useState<RefinedOption[]>([]);
+  const [chosenVariation, setChosenVariation] = useState<RefinedOption | null>(null);
   const [servings, setServings] = useState(defaultServings);
-  const [swapSelections, setSwapSelections] = useState<Record<string, string>>({});
 
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [savedId, setSavedId] = useState<string | null>(null);
 
-  // Every title shown this session, so a refresh does not repeat itself.
-  const rejectedTitles = useRef<string[]>([]);
+  // Every title shown this session, so a stage-2 refresh does not repeat itself.
+  const shownTitles = useRef<string[]>([]);
+  // Whatever async call most recently failed, so "Try again" retries the
+  // right thing rather than guessing from state which stage was in flight.
+  // Set at each call site via `retry()` below, not inside the callbacks
+  // themselves — a memoized callback referencing its own name in its body
+  // is a React Compiler safety violation, even though it's fine at runtime.
+  const retryRef = useRef<() => void>(() => {});
+  const retry = useCallback((fn: () => void) => {
+    retryRef.current = fn;
+    fn();
+  }, []);
 
-  const generate = useCallback(
-    async (refine?: { reaction: string; previousTitles: string[] }) => {
-      setPhase("generating");
+  // ---------------------------------------------------------------------
+  // Stage 2 — six options
+  // ---------------------------------------------------------------------
+
+  const generateOptions = useCallback(
+    async (refresh = false) => {
+      setPhase("loading-options");
       setError(null);
 
       try {
@@ -63,11 +95,10 @@ export function OptionFlow({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             effort_band: input.effortBand,
+            main_ingredient: input.mainIngredient ?? null,
             needs_using_up: input.needsUsingUp ?? null,
-            avoid_titles: rejectedTitles.current.slice(-30),
-            refine: refine
-              ? { reaction: refine.reaction, previous_titles: refine.previousTitles }
-              : null,
+            avoid_titles: shownTitles.current.slice(-30),
+            previous_titles: refresh ? options.map((o) => o.title) : null,
           }),
         });
 
@@ -79,31 +110,29 @@ export function OptionFlow({
           return;
         }
 
-        if (typeof body.remaining_today === "number") {
-          setRemaining(body.remaining_today);
-        }
+        if (typeof body.remaining_today === "number") setRemaining(body.remaining_today);
 
         const next: Option[] = body.options ?? [];
         setOptions(next);
-        rejectedTitles.current.push(...next.map((o) => o.title));
+        shownTitles.current.push(...next.map((o) => o.title));
         setPhase("options");
       } catch {
         setError("Could not reach the app. Check your connection.");
         setPhase("error");
       }
     },
-    [input],
+    [input, options],
   );
 
   const started = useRef(false);
   useEffect(() => {
     if (!started.current) {
       started.current = true;
-      void generate();
+      retry(() => void generateOptions());
     }
-  }, [generate]);
+  }, [retry, generateOptions]);
 
-  /** Permanent — the only per-card reaction the spec commits to storing. */
+  /** Permanent — the one per-card reaction the app commits to storing. */
   const reactNotThis = useCallback(async (option: Option) => {
     setOptions((current) => current.filter((o) => o.id !== option.id));
     try {
@@ -117,35 +146,122 @@ export function OptionFlow({
     }
   }, []);
 
-  const reactMoreLikeThis = useCallback(
+  // ---------------------------------------------------------------------
+  // Stage 3 — tailor the chosen dish
+  // ---------------------------------------------------------------------
+
+  const generateComponents = useCallback(
+    async (option: Option, locked?: { slot: string; value: string } | null) => {
+      setPhase("loading-tailor");
+      setError(null);
+
+      try {
+        const response = await fetch("/api/dish-components", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            option,
+            main_ingredient: input.mainIngredient ?? null,
+            needs_using_up: input.needsUsingUp ?? null,
+            locked: locked ?? null,
+          }),
+        });
+
+        const body = await response.json();
+
+        if (!response.ok) {
+          setError(body.error ?? "Could not tailor that dish.");
+          setPhase("error");
+          return;
+        }
+
+        if (typeof body.remaining_today === "number") setRemaining(body.remaining_today);
+
+        setSlots(body.slots ?? []);
+        setPhase("tailor");
+      } catch {
+        setError("Could not reach the app. Check your connection.");
+        setPhase("error");
+      }
+    },
+    [input],
+  );
+
+  const pickOption = useCallback(
     (option: Option) => {
-      void generate({
-        reaction: `More like "${option.title}" — ${option.axes.richness} in richness, ${option.axes.cuisine}, built around ${option.axes.protein}, cooked by ${option.axes.method}. Preserve whatever made this one appealing and vary the rest.`,
-        previousTitles: options.map((o) => o.title),
+      setChosenOption(option);
+      setSelections({});
+      setLastChangedSlot(null);
+      retry(() => void generateComponents(option));
+    },
+    [generateComponents, retry],
+  );
+
+  const chooseSlotValue = useCallback((slot: string, value: string) => {
+    setSelections((current) => {
+      const next = { ...current };
+      if (next[slot] === value) {
+        delete next[slot]; // tap again to deselect back to "chef's choice"
+      } else {
+        next[slot] = value;
+      }
+      return next;
+    });
+    setLastChangedSlot(slot);
+  }, []);
+
+  const refreshToMatch = useCallback(() => {
+    if (!chosenOption || !lastChangedSlot || !selections[lastChangedSlot]) return;
+    const locked = { slot: lastChangedSlot, value: selections[lastChangedSlot] };
+    retry(() => void generateComponents(chosenOption, locked));
+  }, [chosenOption, lastChangedSlot, selections, generateComponents, retry]);
+
+  // ---------------------------------------------------------------------
+  // Stage 4 — three richer variations
+  // ---------------------------------------------------------------------
+
+  const generateVariations = useCallback(async () => {
+    if (!chosenOption) return;
+    setPhase("loading-variations");
+    setError(null);
+    setChosenVariation(null);
+
+    try {
+      const response = await fetch("/api/dish-variations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          option: chosenOption,
+          component_selections: Object.keys(selections).length > 0 ? selections : null,
+          main_ingredient: input.mainIngredient ?? null,
+          needs_using_up: input.needsUsingUp ?? null,
+        }),
       });
-    },
-    [generate, options],
-  );
 
-  const globalControl = useCallback(
-    (reaction: string) => {
-      void generate({ reaction, previousTitles: options.map((o) => o.title) });
-    },
-    [generate, options],
-  );
+      const body = await response.json();
 
-  const commit = useCallback(
-    (option: Option) => {
-      setCommitted(option);
-      setServings(defaultServings);
-      setSwapSelections({});
-      setPhase("commit");
-    },
-    [defaultServings],
-  );
+      if (!response.ok) {
+        setError(body.error ?? "Could not put those variations together.");
+        setPhase("error");
+        return;
+      }
+
+      if (typeof body.remaining_today === "number") setRemaining(body.remaining_today);
+
+      setVariations(body.options ?? []);
+      setPhase("variations");
+    } catch {
+      setError("Could not reach the app. Check your connection.");
+      setPhase("error");
+    }
+  }, [chosenOption, selections, input]);
+
+  // ---------------------------------------------------------------------
+  // Stage 5 — the recipe
+  // ---------------------------------------------------------------------
 
   const getRecipe = useCallback(async () => {
-    if (!committed) return;
+    if (!chosenVariation) return;
     setPhase("cooking");
     setError(null);
 
@@ -154,9 +270,11 @@ export function OptionFlow({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          option: committed,
+          option: chosenVariation,
           servings,
-          swap_selections: Object.keys(swapSelections).length > 0 ? swapSelections : null,
+          component_selections: Object.keys(selections).length > 0 ? selections : null,
+          main_ingredient: input.mainIngredient ?? null,
+          needs_using_up: input.needsUsingUp ?? null,
         }),
       });
 
@@ -168,9 +286,7 @@ export function OptionFlow({
         return;
       }
 
-      if (typeof body.remaining_today === "number") {
-        setRemaining(body.remaining_today);
-      }
+      if (typeof body.remaining_today === "number") setRemaining(body.remaining_today);
 
       setRecipe(body.recipe);
       setGenerationId(body.generation_id ?? null);
@@ -179,14 +295,14 @@ export function OptionFlow({
       setError("Could not reach the app. Check your connection.");
       setPhase("error");
     }
-  }, [committed, servings, swapSelections]);
+  }, [chosenVariation, servings, selections, input]);
 
   const save = useCallback(async () => {
     if (!recipe) return;
     setSaveState("saving");
 
     try {
-      const result = await saveRecipe(recipe, committed?.id ?? null, generationId, false);
+      const result = await saveRecipe(recipe, chosenVariation?.id ?? null, generationId, false);
       if (result.ok && result.recipeId) {
         setSaveState("saved");
         setSavedId(result.recipeId);
@@ -196,14 +312,14 @@ export function OptionFlow({
     } catch {
       setSaveState("error");
     }
-  }, [recipe, committed, generationId]);
+  }, [recipe, chosenVariation, generationId]);
 
-  const filteredOptions = cuisineFilter
-    ? options.filter((o) => o.axes.cuisine.toLowerCase().includes(cuisineFilter.toLowerCase()))
-    : options;
+  // ---------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------
 
-  if (phase === "generating" || phase === "cooking") {
-    return <Working kind={phase} />;
+  if (phase === "loading-options" || phase === "loading-tailor" || phase === "loading-variations" || phase === "cooking") {
+    return <Working phase={phase} />;
   }
 
   if (phase === "error") {
@@ -214,7 +330,7 @@ export function OptionFlow({
         </p>
         <button
           type="button"
-          onClick={() => (committed ? void getRecipe() : void generate())}
+          onClick={() => retryRef.current()}
           className="min-h-11 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
         >
           Try again
@@ -229,10 +345,10 @@ export function OptionFlow({
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => setPhase("options")}
+            onClick={() => setPhase("variations")}
             className="min-h-11 text-sm text-muted underline"
           >
-            Back to the six
+            Back
           </button>
 
           {saveState === "saved" && savedId ? (
@@ -259,7 +375,7 @@ export function OptionFlow({
 
         <RecipeCard
           recipe={recipe}
-          option={committed}
+          option={chosenVariation}
           unitPrefs={unitPrefs}
           recipeId={savedId ?? undefined}
           onSaved={(id) => {
@@ -271,72 +387,141 @@ export function OptionFlow({
     );
   }
 
-  if (phase === "commit" && committed) {
+  if (phase === "variations") {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setPhase("tailor")}
+            className="min-h-11 text-sm text-muted underline"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={() => retry(() => void generateVariations())}
+            className="min-h-9 rounded-full border border-line px-3 py-1.5 text-sm font-medium"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <ul className="space-y-3">
+          {variations.map((variation) => (
+            <li key={variation.id}>
+              <VariationCard
+                variation={variation}
+                selected={chosenVariation?.id === variation.id}
+                onSelect={() => setChosenVariation(variation)}
+              />
+            </li>
+          ))}
+        </ul>
+
+        {chosenVariation && (
+          <Card className="space-y-3 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium">Servings</span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setServings((s) => Math.max(1, s - 1))}
+                  aria-label="Fewer servings"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line text-lg"
+                >
+                  −
+                </button>
+                <span className="w-6 text-center text-base font-medium tabular-nums">{servings}</span>
+                <button
+                  type="button"
+                  onClick={() => setServings((s) => Math.min(12, s + 1))}
+                  aria-label="More servings"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line text-lg"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => retry(() => void getRecipe())}
+              className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
+            >
+              Generate recipe
+            </button>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  if (phase === "tailor" && chosenOption) {
+    const hasSelections = Object.keys(selections).length > 0;
+
     return (
       <div className="space-y-4">
         <button
           type="button"
-          onClick={() => setPhase("options")}
+          onClick={() => {
+            setChosenOption(null);
+            setPhase("options");
+          }}
           className="min-h-11 text-sm text-muted underline"
         >
           Back to the six
         </button>
 
         <Card className="space-y-2 p-5">
-          <h3 className="text-lg font-semibold leading-tight">{committed.title}</h3>
-          <p className="text-base leading-relaxed text-muted">{committed.description}</p>
+          <h3 className="text-lg font-semibold leading-tight">{chosenOption.title}</h3>
+          <p className="text-base leading-relaxed text-muted">{chosenOption.description}</p>
         </Card>
 
-        <Card className="flex items-center justify-between gap-3 p-4">
-          <span className="text-sm font-medium">Servings</span>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setServings((s) => Math.max(1, s - 1))}
-              aria-label="Fewer servings"
-              className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line text-lg"
-            >
-              −
-            </button>
-            <span className="w-6 text-center text-base font-medium tabular-nums">{servings}</span>
-            <button
-              type="button"
-              onClick={() => setServings((s) => Math.min(12, s + 1))}
-              aria-label="More servings"
-              className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line text-lg"
-            >
-              +
-            </button>
-          </div>
-        </Card>
-
-        {committed.swaps.map((swap) => (
-          <Card key={swap.slot} className="space-y-2 p-4">
-            <label className="block text-sm font-medium capitalize">{swap.slot}</label>
-            <select
-              value={swapSelections[swap.slot] ?? ""}
-              onChange={(e) =>
-                setSwapSelections((current) => ({ ...current, [swap.slot]: e.target.value }))
-              }
-              className="w-full rounded-xl border border-line bg-background px-4 py-3 text-base outline-none focus:border-accent"
-            >
-              <option value="">As written</option>
-              {swap.safe_options.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-            <p className="text-sm text-muted">{swap.note}</p>
+        {slots.map((slot) => (
+          <Card key={slot.slot} className="space-y-2 p-4">
+            <label className="block text-sm font-medium">{slot.label}</label>
+            <div className="flex flex-wrap gap-2">
+              {slot.options.map((option) => {
+                const active = selections[slot.slot] === option.name;
+                return (
+                  <button
+                    key={option.name}
+                    type="button"
+                    onClick={() => chooseSlotValue(slot.slot, option.name)}
+                    className={`min-h-9 rounded-full border px-3 py-1.5 text-sm ${
+                      active ? "border-accent bg-accent text-on-accent" : "border-line"
+                    }`}
+                  >
+                    {option.name}
+                  </button>
+                );
+              })}
+            </div>
+            {selections[slot.slot] &&
+              slot.options.find((o) => o.name === selections[slot.slot])?.note && (
+                <p className="text-sm text-muted">
+                  {slot.options.find((o) => o.name === selections[slot.slot])?.note}
+                </p>
+              )}
           </Card>
         ))}
 
+        {hasSelections && (
+          <button
+            type="button"
+            onClick={refreshToMatch}
+            className="min-h-9 w-full rounded-full border border-line px-3 py-1.5 text-sm font-medium"
+          >
+            Refresh to match
+          </button>
+        )}
+
         <button
           type="button"
-          onClick={() => void getRecipe()}
+          onClick={() => retry(() => void generateVariations())}
           className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
         >
-          Get the recipe
+          Continue
         </button>
       </div>
     );
@@ -344,40 +529,22 @@ export function OptionFlow({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <ControlChip onClick={() => globalControl("Offer six that are meaningfully quicker and easier than this set.")}>
-          Less effort
-        </ControlChip>
-        <ControlChip onClick={() => globalControl("Offer six that are lighter overall than this set.")}>
-          Lighter
-        </ControlChip>
-        <ControlChip onClick={() => globalControl("Avoid the proteins used in this set; offer genuinely different ones.")}>
-          Different protein
-        </ControlChip>
-        <ControlChip onClick={() => void generate()}>None of these</ControlChip>
-
-        <select
-          value={cuisineFilter ?? ""}
-          onChange={(e) => setCuisineFilter(e.target.value || null)}
-          aria-label="Filter by cuisine"
-          className="min-h-9 rounded-full border border-line bg-background px-3 py-1.5 text-sm"
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => retry(() => void generateOptions(true))}
+          className="min-h-9 rounded-full border border-line px-3 py-1.5 text-sm font-medium"
         >
-          <option value="">Any cuisine</option>
-          {CUISINES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+          Refresh
+        </button>
       </div>
 
       <ul className="space-y-3">
-        {filteredOptions.map((option) => (
+        {options.map((option) => (
           <li key={option.id}>
             <OptionCard
               option={option}
-              onCommit={() => commit(option)}
-              onMoreLikeThis={() => reactMoreLikeThis(option)}
+              onCommit={() => pickOption(option)}
               onNotThis={() => void reactNotThis(option)}
             />
           </li>
@@ -393,27 +560,13 @@ export function OptionFlow({
   );
 }
 
-function ControlChip({ children, onClick }: { children: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="min-h-9 rounded-full border border-line px-3 py-1.5 text-sm font-medium"
-    >
-      {children}
-    </button>
-  );
-}
-
 function OptionCard({
   option,
   onCommit,
-  onMoreLikeThis,
   onNotThis,
 }: {
   option: Option;
   onCommit: () => void;
-  onMoreLikeThis: () => void;
   onNotThis: () => void;
 }) {
   return (
@@ -421,48 +574,67 @@ function OptionCard({
       <button type="button" onClick={onCommit} className="w-full space-y-2 text-left">
         <h3 className="text-lg font-semibold leading-tight">{option.title}</h3>
         <p className="text-base leading-relaxed text-muted">{option.description}</p>
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted">
-          <span>{option.axes.cuisine}</span>
-          <span>{formatMinutes(option.effort_minutes)}</span>
-          <span className="capitalize">{option.axes.richness}</span>
-        </div>
+        <p className="text-sm text-muted">
+          {option.cuisine} · {formatMinutes(option.effort_minutes)}
+        </p>
+        {option.uses_named_ingredients.length > 0 && (
+          <p className="text-sm text-accent">Uses: {option.uses_named_ingredients.join(", ")}</p>
+        )}
       </button>
-      <div className="flex gap-2 pt-1">
-        <button
-          type="button"
-          onClick={onMoreLikeThis}
-          className="min-h-9 flex-1 rounded-lg border border-line text-sm font-medium"
-        >
-          More like this
-        </button>
-        <button
-          type="button"
-          onClick={onNotThis}
-          className="min-h-9 flex-1 rounded-lg border border-line text-sm font-medium"
-        >
-          Not this
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={onNotThis}
+        className="min-h-9 w-full rounded-lg border border-line text-sm font-medium"
+      >
+        Not this
+      </button>
     </Card>
   );
 }
 
-const GENERATING_STAGES = ["Drawing inspiration…", "Ruling out repeats…", "Picking six…"];
-const COOKING_STAGES = ["Working out the method…", "Weighing everything…", "Writing the steps…"];
+function VariationCard({
+  variation,
+  selected,
+  onSelect,
+}: {
+  variation: RefinedOption;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <Card className={`overflow-hidden ${selected ? "border-accent" : ""}`}>
+      <button type="button" onClick={onSelect} className="w-full space-y-2 p-5 text-left">
+        <h3 className="text-lg font-semibold leading-tight">{variation.title}</h3>
+        <p className="text-base leading-relaxed text-muted">{variation.description}</p>
+        <p className="text-sm text-muted">
+          {variation.cuisine} · {formatMinutes(variation.effort_minutes)}
+        </p>
+        <p className="text-sm text-muted">{variation.hero_ingredients.join(", ")}</p>
+        {variation.flavours.length > 0 && (
+          <p className="text-sm text-muted">{variation.flavours.join(" · ")}</p>
+        )}
+        {variation.uses_named_ingredients.length > 0 && (
+          <p className="text-sm text-accent">Uses: {variation.uses_named_ingredients.join(", ")}</p>
+        )}
+      </button>
+    </Card>
+  );
+}
 
-/**
- * Staged progress rather than a bare spinner. A blank screen for eight seconds
- * feels broken (FR4.5).
- */
-function Working({ kind }: { kind: "generating" | "cooking" }) {
-  const stages = kind === "generating" ? GENERATING_STAGES : COOKING_STAGES;
+const STAGE_LABELS: Record<string, string[]> = {
+  "loading-options": ["Drawing inspiration…", "Ruling out repeats…", "Picking six…"],
+  "loading-tailor": ["Reading the dish…", "Working out what fits…"],
+  "loading-variations": ["Weighing the options…", "Writing three ways to go…"],
+  cooking: ["Working out the method…", "Weighing everything…", "Writing the steps…"],
+};
+
+/** Staged progress rather than a bare spinner. A blank screen feels broken (FR4.5). */
+function Working({ phase }: { phase: string }) {
+  const stages = STAGE_LABELS[phase] ?? ["Working…"];
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
-    const timer = setInterval(
-      () => setIndex((i) => Math.min(i + 1, stages.length - 1)),
-      2600,
-    );
+    const timer = setInterval(() => setIndex((i) => Math.min(i + 1, stages.length - 1)), 2600);
     return () => clearInterval(timer);
   }, [stages.length]);
 

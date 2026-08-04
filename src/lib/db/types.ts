@@ -17,10 +17,9 @@ export type DietaryRuleType = "allergen" | "avoid" | "diet";
 export type SpiceTolerance = "mild" | "medium" | "hot" | "very_hot";
 
 /**
- * 'flavour' and 'plate' are orphaned once the Builder is removed — kept here
- * so historical rows in `generations` still type-check when read, even though
- * nothing writes them anymore. 'suggestions' is the same story once the
- * six-option flow replaces it.
+ * 'flavour', 'plate', 'suggestions' and 'options_refine' are orphaned by
+ * earlier redesigns — kept here so historical rows in `generations` still
+ * type-check when read, even though nothing writes them anymore.
  */
 export type GenerationType =
   | "flavour"
@@ -28,7 +27,9 @@ export type GenerationType =
   | "suggestions"
   | "recipe"
   | "options"
-  | "options_refine";
+  | "options_refine"
+  | "dish_components"
+  | "dish_variations";
 
 export type ListStatus = "active" | "archived";
 

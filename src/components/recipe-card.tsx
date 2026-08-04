@@ -15,7 +15,7 @@ import {
   type UnitPrefs,
 } from "@/lib/recipe/scale";
 import type { Recipe } from "@/lib/schemas/recipe";
-import type { Option } from "@/lib/schemas/option";
+import type { RefinedOption } from "@/lib/schemas/dish-variations";
 
 /**
  * Metric/imperial for the on-card toggle, folded into one flip rather than
@@ -54,7 +54,7 @@ export function RecipeCard({
   onSaved,
 }: {
   recipe: Recipe;
-  option?: Option | null;
+  option?: RefinedOption | null;
   unitPrefs?: UnitPrefs;
   /** The saved recipe's id, when there is one — keys cooking mode's ticked-step persistence. */
   recipeId?: string;

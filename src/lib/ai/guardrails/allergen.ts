@@ -1,5 +1,7 @@
 import type { Recipe } from "@/lib/schemas/recipe";
 import type { Option } from "@/lib/schemas/option";
+import type { DishComponentsResponse } from "@/lib/schemas/dish-components";
+import type { RefinedOption } from "@/lib/schemas/dish-variations";
 
 /**
  * Allergen enforcement in code, after generation (PRD 9.5).
@@ -195,7 +197,7 @@ export function checkRecipeForAllergens(
   );
 }
 
-/** The same check applied to an option, before a card is ever generated. */
+/** The same check applied to a stage-2 option, before a card is ever shown. */
 export function checkOptionForAllergens(
   option: Option,
   declaredAllergens: string[],
@@ -208,16 +210,54 @@ export function checkOptionForAllergens(
       { location: "title", text: option.title },
       { location: "description", text: option.description },
       { location: "axes.protein", text: option.axes.protein },
-      ...option.key_ingredients.map((item, i) => ({
-        location: `key_ingredients[${i}]`,
+      ...option.uses_named_ingredients.map((item, i) => ({
+        location: `uses_named_ingredients[${i}]`,
         text: item,
       })),
-      ...option.swaps.flatMap((swap, i) =>
-        swap.safe_options.map((value, j) => ({
-          location: `swaps[${i}].safe_options[${j}]`,
-          text: value,
-        })),
-      ),
+    ],
+    terms,
+  );
+}
+
+/** Applied to stage 3's tailoring suggestions before they reach the screen. */
+export function checkDishComponentsForAllergens(
+  components: DishComponentsResponse,
+  declaredAllergens: string[],
+): AllergenHit[] {
+  const terms = expandAllergenTerms(declaredAllergens);
+  if (terms.length === 0) return [];
+
+  return scan(
+    components.slots.flatMap((slot, i) =>
+      slot.options.flatMap((option, j) => [
+        { location: `slots[${i}].options[${j}].name`, text: option.name },
+        { location: `slots[${i}].options[${j}].note`, text: option.note },
+      ]),
+    ),
+    terms,
+  );
+}
+
+/** Applied to stage 4's three richer variations before they reach the screen. */
+export function checkRefinedOptionForAllergens(
+  option: RefinedOption,
+  declaredAllergens: string[],
+): AllergenHit[] {
+  const terms = expandAllergenTerms(declaredAllergens);
+  if (terms.length === 0) return [];
+
+  return scan(
+    [
+      { location: "title", text: option.title },
+      { location: "description", text: option.description },
+      ...option.hero_ingredients.map((item, i) => ({
+        location: `hero_ingredients[${i}]`,
+        text: item,
+      })),
+      ...option.flavours.map((item, i) => ({
+        location: `flavours[${i}]`,
+        text: item,
+      })),
     ],
     terms,
   );
