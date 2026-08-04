@@ -1,5 +1,5 @@
 import type { Recipe } from "@/lib/schemas/recipe";
-import type { Suggestion } from "@/lib/schemas/suggestion";
+import type { Option } from "@/lib/schemas/option";
 
 /**
  * Allergen enforcement in code, after generation (PRD 9.5).
@@ -195,32 +195,29 @@ export function checkRecipeForAllergens(
   );
 }
 
-/** The same check applied to a suggestion, before a card is ever generated. */
-export function checkSuggestionForAllergens(
-  suggestion: Suggestion,
+/** The same check applied to an option, before a card is ever generated. */
+export function checkOptionForAllergens(
+  option: Option,
   declaredAllergens: string[],
 ): AllergenHit[] {
   const terms = expandAllergenTerms(declaredAllergens);
   if (terms.length === 0) return [];
 
-  const { components } = suggestion;
-
   return scan(
     [
-      { location: "title", text: suggestion.title },
-      { location: "pitch", text: suggestion.pitch },
-      { location: "components.protein", text: components.protein },
-      { location: "components.fat", text: components.fat },
-      { location: "components.carb", text: components.carb },
-      ...components.veg.map((veg, i) => ({
-        location: `components.veg[${i}]`,
-        text: veg,
-      })),
-      { location: "flavour_layer", text: suggestion.flavour_layer },
-      ...suggestion.ingredients_not_in_bank.map((item, i) => ({
-        location: `ingredients_not_in_bank[${i}]`,
+      { location: "title", text: option.title },
+      { location: "description", text: option.description },
+      { location: "axes.protein", text: option.axes.protein },
+      ...option.key_ingredients.map((item, i) => ({
+        location: `key_ingredients[${i}]`,
         text: item,
       })),
+      ...option.swaps.flatMap((swap, i) =>
+        swap.safe_options.map((value, j) => ({
+          location: `swaps[${i}].safe_options[${j}]`,
+          text: value,
+        })),
+      ),
     ],
     terms,
   );

@@ -11,7 +11,6 @@ import type {
   SettingsRow,
   UserRow,
 } from "@/lib/db/types";
-import { VarietySection } from "./variety-section";
 import {
   addDietaryRule,
   createInvite,
@@ -228,14 +227,6 @@ export default async function SettingsPage() {
             <p className="text-sm text-muted">Comma separated. Added as available.</p>
           </div>
         </SaveForm>
-      </Section>
-
-      {/* FR2.7 */}
-      <Section
-        title="Variety"
-        description="How often you are offered something you have had recently."
-      >
-        <VarietySection settings={typedSettings} />
       </Section>
 
       {/* FR2.2 */}

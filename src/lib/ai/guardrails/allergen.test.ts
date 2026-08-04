@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkOptionForAllergens,
   checkRecipeForAllergens,
-  checkSuggestionForAllergens,
   expandAllergenTerms,
 } from "./allergen";
 import type { Recipe } from "@/lib/schemas/recipe";
-import type { Suggestion } from "@/lib/schemas/suggestion";
+import type { Option } from "@/lib/schemas/option";
 
 function recipe(overrides: Partial<Recipe> = {}): Recipe {
   return {
@@ -28,7 +28,6 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
         component: "protein",
         scales: "linear",
         optional: false,
-        in_bank: true,
       },
     ],
     steps: [
@@ -46,24 +45,23 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
   };
 }
 
-function suggestion(overrides: Partial<Suggestion> = {}): Suggestion {
+function option(overrides: Partial<Option> = {}): Option {
   return {
-    id: "s1",
-    meal_type: "dinner",
+    id: "o1",
     title: "Charred greens with tahini",
-    pitch: "Quick, sharp, and mostly from the cupboard.",
-    cuisine: "Middle Eastern",
-    components: {
+    description: "Quick, sharp, and mostly from the cupboard.",
+    effort_minutes: 25,
+    key_ingredients: ["chickpeas", "tenderstem broccoli", "tahini"],
+    axes: {
       protein: "chickpeas",
-      fat: "olive oil",
-      carb: "flatbread",
-      veg: ["tenderstem broccoli"],
+      method: "griddle",
+      cuisine: "Middle Eastern",
+      richness: "light",
     },
-    flavour_layer: "tahini and lemon",
-    total_minutes: 25,
-    difficulty: "easy",
-    ingredients_not_in_bank: [],
-    uses_named_ingredients: [],
+    swaps: [],
+    techniques: ["griddle"],
+    max_technique_tier: 2,
+    difficulty_score: null,
     ...overrides,
   };
 }
@@ -109,7 +107,6 @@ describe("checkRecipeForAllergens", () => {
             component: "fat",
             scales: "sublinear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -161,7 +158,6 @@ describe("checkRecipeForAllergens", () => {
             component: "protein",
             scales: "linear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -194,7 +190,6 @@ describe("checkRecipeForAllergens", () => {
             component: "veg",
             scales: "linear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -217,7 +212,6 @@ describe("checkRecipeForAllergens", () => {
             component: "veg",
             scales: "linear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -240,7 +234,6 @@ describe("checkRecipeForAllergens", () => {
             component: "flavour_layer",
             scales: "sublinear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -260,31 +253,32 @@ describe("checkRecipeForAllergens", () => {
   });
 });
 
-describe("checkSuggestionForAllergens", () => {
+describe("checkOptionForAllergens", () => {
   // Catching it here saves generating a card that would be thrown away.
-  it("catches an allergen in a suggestion's components", () => {
-    const hits = checkSuggestionForAllergens(
-      suggestion({
-        components: {
-          protein: "king prawns",
-          fat: "olive oil",
-          carb: "rice",
-          veg: ["pak choi"],
-        },
+  it("catches an allergen in an option's key ingredients", () => {
+    const hits = checkOptionForAllergens(
+      option({
+        key_ingredients: ["king prawns", "olive oil", "rice", "pak choi"],
+        axes: { protein: "king prawns", method: "stir fry", cuisine: "Cantonese", richness: "light" },
       }),
       ["shellfish"],
     );
 
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits[0].location).toBe("components.protein");
   });
 
-  it("catches an allergen in the flavour layer", () => {
-    const hits = checkSuggestionForAllergens(suggestion(), ["sesame"]);
-    expect(hits.map((h) => h.location)).toContain("flavour_layer");
+  it("catches an allergen in a swap's safe options", () => {
+    const hits = checkOptionForAllergens(
+      option({
+        swaps: [{ slot: "protein", safe_options: ["prawns", "squid"], note: "both work in this braise" }],
+      }),
+      ["shellfish"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("swaps[0].safe_options[0]");
   });
 
-  it("passes a clean suggestion", () => {
-    expect(checkSuggestionForAllergens(suggestion(), ["peanuts"])).toEqual([]);
+  it("passes a clean option", () => {
+    expect(checkOptionForAllergens(option(), ["peanuts"])).toEqual([]);
   });
 });

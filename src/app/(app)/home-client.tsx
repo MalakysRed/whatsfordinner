@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { SuggestionFlow } from "@/components/suggestion-flow";
+import { EffortGate } from "@/components/effort-gate";
+import { OptionFlow, type EffortInput } from "@/components/option-flow";
 import type { UnitPrefs } from "@/lib/recipe/scale";
 
 /**
  * The home screen.
  *
- * "Surprise us" is one tap and takes no input: it generates from the ingredient
- * bank, the settings and the dietary rules alone. Guard that in review — it is
- * the whole reason the app exists, and anything added in front of it is a
- * regression however good it looks.
+ * "Surprise us" is one tap and takes no input: it skips stage 1 entirely with
+ * a default effort band and goes straight to six options generated from
+ * silent context alone. Guard that in review — it is the whole reason the
+ * app exists, and anything added in front of it is a regression however good
+ * it looks. "Choose your effort" is the one-question stage-1 gate for when
+ * the household wants to say how much cooking they're up for.
  */
 export function HomeClient({
   defaultServings,
@@ -20,23 +22,42 @@ export function HomeClient({
   defaultServings: number;
   unitPrefs?: UnitPrefs;
 }) {
-  const [surprising, setSurprising] = useState(false);
+  const [mode, setMode] = useState<"idle" | "gate" | "running">("idle");
+  const [input, setInput] = useState<EffortInput | null>(null);
 
-  if (surprising) {
+  if (mode === "running" && input) {
     return (
       <div className="space-y-5">
         <button
           type="button"
-          onClick={() => setSurprising(false)}
+          onClick={() => {
+            setMode("idle");
+            setInput(null);
+          }}
           className="min-h-11 text-sm text-muted underline"
         >
           Start over
         </button>
-        <SuggestionFlow
-          constraints={{}}
-          autoStart
-          defaultServings={defaultServings}
-          unitPrefs={unitPrefs}
+        <OptionFlow input={input} defaultServings={defaultServings} unitPrefs={unitPrefs} />
+      </div>
+    );
+  }
+
+  if (mode === "gate") {
+    return (
+      <div className="space-y-5">
+        <button
+          type="button"
+          onClick={() => setMode("idle")}
+          className="min-h-11 text-sm text-muted underline"
+        >
+          Back
+        </button>
+        <EffortGate
+          onSubmit={(gateInput) => {
+            setInput(gateInput);
+            setMode("running");
+          }}
         />
       </div>
     );
@@ -46,32 +67,26 @@ export function HomeClient({
     <div className="space-y-4">
       <button
         type="button"
-        onClick={() => setSurprising(true)}
+        onClick={() => {
+          setInput({ effortBand: "standard", needsUsingUp: null });
+          setMode("running");
+        }}
         className="min-h-32 w-full rounded-3xl bg-accent px-6 py-8 text-left text-on-accent"
       >
         <span className="block text-2xl font-semibold tracking-tight">Surprise us</span>
         <span className="mt-1 block text-base opacity-90">
-          Three dinners from what you like. No questions.
+          Six dinners from what you like. No questions.
         </span>
       </button>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Link
-          href="/build"
-          className="flex min-h-24 flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4"
-        >
-          <span className="text-lg font-medium">Build a meal</span>
-          <span className="mt-0.5 text-sm text-muted">Pick the shape of it</span>
-        </Link>
-
-        <Link
-          href="/build?use-it-up=1"
-          className="flex min-h-24 flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4"
-        >
-          <span className="text-lg font-medium">Use it up</span>
-          <span className="mt-0.5 text-sm text-muted">What needs eating?</span>
-        </Link>
-      </div>
+      <button
+        type="button"
+        onClick={() => setMode("gate")}
+        className="flex min-h-24 w-full flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4 text-left"
+      >
+        <span className="text-lg font-medium">Choose your effort</span>
+        <span className="mt-0.5 text-sm text-muted">Quick, standard, or a project</span>
+      </button>
     </div>
   );
 }

@@ -2,11 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { generateRecipe } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
-import { suggestionSchema } from "@/lib/schemas/suggestion";
+import { optionSchema } from "@/lib/schemas/option";
 
 const bodySchema = z.object({
-  suggestion: suggestionSchema,
+  option: optionSchema,
   servings: z.number().int().min(1).max(12),
+  /** Chosen values from the committed option's own `swaps` array, keyed by slot. */
+  swap_selections: z.record(z.string(), z.string()).nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -22,8 +24,9 @@ export async function POST(request: NextRequest) {
 
   try {
     const { recipe, generationId } = await generateRecipe(caller, {
-      suggestion: parsed.data.suggestion,
+      option: parsed.data.option,
       servings: parsed.data.servings,
+      swapSelections: parsed.data.swap_selections,
     });
 
     return NextResponse.json({

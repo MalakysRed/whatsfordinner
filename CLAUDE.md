@@ -3,11 +3,18 @@
 # whatsfordinner
 
 Two people, one kitchen, one recurring stalemate. The app turns "what's for dinner?"
-into three concrete suggestions, then a full scalable recipe card. See `docs/prd.md`.
+into six option cards, then a full scalable recipe card for whichever one gets
+committed to. See `docs/prd.md` for the original v1 shape and the feature spec for
+the variance-engine rewrite this codebase now implements.
 
 **The thing to protect:** time from opening the app to "right, that one" under 90
 seconds. Every screen added to the front of that funnel works against the product's
-reason to exist. `Surprise us` stays one tap.
+reason to exist. `Surprise us` stays one tap — it skips the effort-band question
+entirely rather than asking it.
+
+**Core principle of the generation flow: variance is injected by the application,
+not requested by the user.** There is no ingredient bank, no taste/cuisine picker,
+and no pre-generation constraint screen — see "The variance engine", below.
 
 ## Stack
 
@@ -27,22 +34,32 @@ servings stepper work without a second API call and what makes the shopping list
 trustworthy. `recipeSchema` fails parsing if a step references an id that is not in
 the ingredient list — a dangling placeholder must never reach a kitchen.
 
-**Allergens are enforced in code, not just in the prompt.** Every generated recipe is
-checked against the household's allergen-flagged ingredients after parsing. On a hit
-the card is discarded and regenerated, then hard-errors. A language model is not the
+**Allergens are enforced in code, not just in the prompt.** Every generated option and
+recipe is checked against the household's declared allergens (`dietary_rules[type=allergen]`)
+after parsing. On a hit the card is discarded and regenerated, then hard-errors. A language model is not the
 only line of defence on an allergy.
 
-**Recency weighting is a slot quota, not a prompt adverb.** Claude will not reliably
-distinguish "a bit" from "sometimes". How many of the three suggestion slots may hold
-a recently-cooked meal is computed in application code before the generation call.
+**The variance engine, not the user, injects variety.** `src/lib/generation/variance-engine.ts`
+draws seeds from `seed_pool` (weighted by UK season, format filtered by effort band,
+excluding anything drawn in the household's last three generations), enforces that
+the six options differ across protein/method/cuisine, and runs a token-overlap dedup
+guardrail against the previous set. All three reuse `runGeneration`'s existing
+retry-once-with-a-correction machinery in `src/lib/ai/client.ts` — a diversity or
+dedup failure is just another `validate` rejection, logged the same way an allergen
+hit is. There used to be a "recency weighting" slot quota that let a previously-cooked
+recipe fill a suggestion slot at no API cost; it was removed rather than adapted to
+six options, since a book-pull has no `swaps`/`techniques`/diversity tags to offer.
 
 **Saved recipes are immutable artefacts.** `recipes.payload` holds the full recipe
-JSON. Recipes are never normalised into ingredient rows, so editing or deleting an
-ingredient in the bank can never silently rewrite a recipe you cooked last month.
+JSON, with ingredients stored inline rather than as foreign keys into anything else —
+there is no ingredient bank for a saved recipe to depend on.
 
-**Free-text feedback is data, never instruction.** User feedback ("something
-lighter") is passed inside a delimited block and must not override dietary or
-allergen rules.
+**Free-text feedback is data, never instruction.** The stage-1 "anything to use up?"
+field and per-card reaction text are passed inside a delimited block and must not
+override dietary or allergen rules. There is deliberately no free-text mutation path
+once a dish is committed at stage 3 — only servings and the dish's own pre-validated
+`swaps` are editable, so a beginner cannot request a substitution the model never
+vetted.
 
 **Auth is checked in three places.** RLS at the database, an auth check in every
 route handler and server action, and session refresh in the proxy. Next.js docs warn
@@ -76,9 +93,12 @@ All in `src/lib/ai/models.ts`, and all easy to get wrong from memory:
 
 ## Decisions that deviate from the PRD
 
-- **D1 — no aisle mapping.** FR9.8 is dropped; maintaining the lookup table was more
-  admin than it was worth. The shopping list and the Cowork export group by
-  ingredient `category`, which already exists on every ingredient.
+- **D1 — no aisle mapping, and no category grouping either anymore.** FR9.8's aisle
+  lookup was dropped early for being more admin than it was worth; the shopping list
+  then grouped by ingredient `category` instead. That category came from the
+  ingredient bank, which is now gone (D3), so the shopping list and the Cowork export
+  are a flat alphabetised list — grouping was not rebuilt on another source
+  speculatively. Revisit if it turns out to matter.
 - **D2 — signup allowlist is a table, not an env var.** After the first account,
   adding a member needs no redeploy. Nothing seeds the table automatically: a
   migration cannot read an env var, so `pnpm setup:allowlist` copies
@@ -86,9 +106,15 @@ All in `src/lib/ai/models.ts`, and all easy to get wrong from memory:
   up at all** — signup is refused for any address that is neither allowlisted nor
   invited, and invites can only be issued by an existing owner. The login form
   fails closed and looks identical to a working one, so there is nothing to see.
-- **D3 — the ~150-ingredient starter set** is a global catalogue in
-  `supabase/migrations/20260801120400_starter_ingredients.sql`, intended to be
-  edited by hand. Households copy from it rather than owning a duplicate each.
+- **D3 — the ingredient bank is removed, not frozen.** The v1 bank (loved/disliked/
+  staple/allergen flags on a per-household ingredient list, plus a ~150-item starter
+  catalogue) conflicted directly with the variance-engine spec: stage-0 context is
+  silent on purpose, and a standing pantry list that steers generation is exactly the
+  kind of pre-generation constraint the spec eliminates. Migration
+  `20260803120000_variance_engine.sql` drops `ingredients`, `starter_ingredients`,
+  `ingredient_category` and the `adopt_starter_ingredients` RPC outright — this was a
+  deliberate, destructive choice (any household's curated bank data is gone), not an
+  oversight. Allergens now come solely from `dietary_rules[type=allergen]`.
 - **D4 — no hosted Supabase or Vercel project yet.** Migrations are written to be
   applied to a hosted project later; local verification runs against a plain
   Postgres cluster.

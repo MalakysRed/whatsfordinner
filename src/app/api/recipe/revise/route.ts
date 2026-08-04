@@ -3,18 +3,19 @@ import { z } from "zod";
 import { generateRecipe } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
 import { recipeSchema } from "@/lib/schemas/recipe";
-import { suggestionSchema } from "@/lib/schemas/suggestion";
+import { optionSchema } from "@/lib/schemas/option";
 
 /**
- * Regenerate a card with a comment ("too much faff", "we do not have a pestle
- * and mortar", "make the sauce sharper"). Also serves the re-check offered when
- * the serving count moves by more than a factor of two (FR5.4).
+ * Re-checks a card at a new serving count when it moves by more than a
+ * factor of two (FR5.4). This is a recalculation, not a mutation of the
+ * dish — the spec's "no free-text mutation at stage 3" rule is about
+ * changing what the dish *is*, not about servings, which stage 3 explicitly
+ * permits.
  */
 const bodySchema = z.object({
-  suggestion: suggestionSchema,
+  option: optionSchema,
   previous: recipeSchema,
   servings: z.number().int().min(1).max(12),
-  feedback: z.string().max(500).nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -30,9 +31,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const { recipe, generationId } = await generateRecipe(caller, {
-      suggestion: parsed.data.suggestion,
+      option: parsed.data.option,
       servings: parsed.data.servings,
-      feedback: parsed.data.feedback,
       previous: parsed.data.previous,
     });
 

@@ -70,6 +70,8 @@ export const MODEL_FOR_CALL: Record<GenerationType, ModelKey> = {
   plate: "haiku",
   suggestions: "sonnet",
   recipe: "sonnet",
+  options: "haiku",
+  options_refine: "haiku",
 };
 
 /**
@@ -87,6 +89,8 @@ export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> 
   plate: "low",
   suggestions: "low",
   recipe: "medium",
+  options: "low",
+  options_refine: "low",
 };
 
 /**
@@ -99,6 +103,10 @@ export const MAX_TOKENS_FOR_CALL: Record<GenerationType, number> = {
   plate: 4_000,
   suggestions: 12_000,
   recipe: 20_000,
+  // Six cards with swaps and technique tags each — noticeably larger than the
+  // old three-suggestion response.
+  options: 16_000,
+  options_refine: 16_000,
 };
 
 export interface TokenUsage {

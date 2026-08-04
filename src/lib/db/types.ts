@@ -10,50 +10,34 @@ export type MealType = "dinner" | "breakfast" | "lunch" | "snack" | "side";
 
 export type MembershipRole = "member" | "owner";
 
-export type IngredientCategory =
-  | "animal_protein"
-  | "plant_protein"
-  | "healthy_fat"
-  | "complex_carb"
-  | "vegetable"
-  | "fruit"
-  | "dairy"
-  | "herb_and_spice"
-  | "pantry"
-  | "condiment";
-
 export type Difficulty = "easy" | "medium" | "involved";
 
 export type DietaryRuleType = "allergen" | "avoid" | "diet";
 
 export type SpiceTolerance = "mild" | "medium" | "hot" | "very_hot";
 
-export type RecencyWeighting = "never" | "a_bit" | "sometimes" | "mostly" | "always";
-
-export type GenerationType = "flavour" | "suggestions" | "recipe" | "plate";
+/**
+ * 'flavour' and 'plate' are orphaned once the Builder is removed — kept here
+ * so historical rows in `generations` still type-check when read, even though
+ * nothing writes them anymore. 'suggestions' is the same story once the
+ * six-option flow replaces it.
+ */
+export type GenerationType =
+  | "flavour"
+  | "plate"
+  | "suggestions"
+  | "recipe"
+  | "options"
+  | "options_refine";
 
 export type ListStatus = "active" | "archived";
 
-/** Display labels for the ingredient categories, in plate order. */
-export const INGREDIENT_CATEGORIES: {
-  value: IngredientCategory;
-  label: string;
-}[] = [
-  { value: "animal_protein", label: "Animal protein" },
-  { value: "plant_protein", label: "Plant protein" },
-  { value: "healthy_fat", label: "Healthy fat" },
-  { value: "complex_carb", label: "Complex carb" },
-  { value: "vegetable", label: "Vegetable" },
-  { value: "fruit", label: "Fruit" },
-  { value: "dairy", label: "Dairy" },
-  { value: "herb_and_spice", label: "Herb and spice" },
-  { value: "pantry", label: "Pantry" },
-  { value: "condiment", label: "Condiment" },
-];
+export type SeedAxis = "cuisine" | "format" | "hero";
+export type SeedStatus = "active" | "candidate" | "retired";
+export type SeedSource = "curated" | "harvested" | "proposed";
 
-export const CATEGORY_LABELS = Object.fromEntries(
-  INGREDIENT_CATEGORIES.map((c) => [c.value, c.label]),
-) as Record<IngredientCategory, string>;
+export type ExclusionAxis = "protein" | "method" | "cuisine" | "dish";
+export type ExclusionReaction = "excluded" | "preferred";
 
 export interface UserRow {
   id: string;
@@ -95,10 +79,6 @@ export interface SettingsRow {
   delivery_day: string | null;
   shopping_notes: string | null;
   daily_generation_cap: number;
-  only_new: boolean;
-  recency_weighting: RecencyWeighting;
-  recency_window_days: number;
-  include_favourites: boolean;
   /** Keyed by meal type; only the dinner key is read in v1. */
   meal_defaults: Partial<Record<MealType, MealDefaults>>;
   updated_at: string;
@@ -120,28 +100,24 @@ export interface DietaryRuleRow {
   created_at: string;
 }
 
-export interface IngredientRow {
+export interface SeedPoolRow {
   id: string;
-  household_id: string;
+  axis: SeedAxis;
   name: string;
-  category: IngredientCategory;
-  typical_unit: string | null;
-  loved: boolean;
-  disliked: boolean;
-  staple: boolean;
-  allergen: boolean;
-  notes: string | null;
-  seasonality: string | null;
-  use_count: number;
-  suitable_meal_types: MealType[] | null;
+  /** UK seasons for cuisine/hero rows, effort bands for format rows. */
+  tags: string[];
+  status: SeedStatus;
+  source: SeedSource;
   created_at: string;
 }
 
-export interface StarterIngredientRow {
-  name: string;
-  category: IngredientCategory;
-  typical_unit: string | null;
-  staple_default: boolean;
+export interface PreferenceExclusionRow {
+  id: string;
+  household_id: string;
+  axis: ExclusionAxis;
+  value: string;
+  reaction: ExclusionReaction;
+  created_at: string;
 }
 
 export interface RecipeRow {

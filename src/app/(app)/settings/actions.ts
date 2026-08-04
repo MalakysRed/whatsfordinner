@@ -10,7 +10,6 @@ import {
   householdNameSchema,
   measurementsSchema,
   shoppingSchema,
-  varietySchema,
 } from "@/lib/schemas/settings";
 import type { MealDefaults, MealType } from "@/lib/db/types";
 
@@ -157,36 +156,6 @@ export async function saveGenerationSettings(
 
   if (!parsed.success) {
     return { status: "error", message: "The cap must be between 1 and 500." };
-  }
-
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("settings")
-    .update(parsed.data)
-    .eq("household_id", session.householdId);
-
-  if (error) return { status: "error", message: "Could not save. Try again." };
-
-  revalidatePath("/settings");
-  return { status: "saved" };
-}
-
-/** FR2.7 — suggestion variety. */
-export async function saveVariety(
-  _prev: ActionResult,
-  formData: FormData,
-): Promise<ActionResult> {
-  const session = await requireHouseholdSession();
-
-  const parsed = varietySchema.safeParse({
-    only_new: checked(formData, "only_new"),
-    recency_weighting: formData.get("recency_weighting"),
-    recency_window_days: Number(formData.get("recency_window_days")),
-    include_favourites: checked(formData, "include_favourites"),
-  });
-
-  if (!parsed.success) {
-    return { status: "error", message: "The window must be between 1 and 90 days." };
   }
 
   const supabase = await createClient();

@@ -25,23 +25,6 @@ export function WelcomeForm() {
         />
       </div>
 
-      <label className="flex items-start gap-3 rounded-2xl border border-line bg-raised p-4">
-        <input
-          type="checkbox"
-          name="adopt_starters"
-          defaultChecked
-          className="mt-1 size-5 accent-[var(--accent)]"
-        />
-        <span className="text-sm leading-relaxed">
-          <span className="font-medium">Start with a stocked bank</span>
-          <span className="block text-muted">
-            Around 170 common ingredients, flagged with sensible staples. Edit or
-            delete anything — it is only a starting point, and it means you can
-            generate something tonight rather than after an evening of typing.
-          </span>
-        </span>
-      </label>
-
       {state.status === "error" && (
         <p role="alert" className="text-sm text-danger">
           {state.message}
