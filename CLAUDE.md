@@ -9,8 +9,8 @@ the variance-engine rewrite this codebase now implements.
 
 **The thing to protect:** time from opening the app to "right, that one" under 90
 seconds. Every screen added to the front of that funnel works against the product's
-reason to exist. `Surprise me` stays one tap — it skips the effort-band question
-entirely rather than asking it.
+reason to exist. `Craft a recipe` is the sole entry point (see D5) — keep its five
+stages tight rather than adding a sixth.
 
 **Core principle of the generation flow: variance is injected by the application,
 not requested by the user.** There is no ingredient bank, no taste/cuisine picker,
@@ -118,6 +118,15 @@ All in `src/lib/ai/models.ts`, and all easy to get wrong from memory:
 - **D4 — no hosted Supabase or Vercel project yet.** Migrations are written to be
   applied to a hosted project later; local verification runs against a plain
   Postgres cluster.
+- **D5 — the zero-input "Surprise us/me" tap is removed, not just renamed.** The
+  PRD's golden path opened with it ("Tap Surprise us. No further input.") and its
+  own risk table said to guard it in review specifically against removal ("the
+  funnel gets long and you stop using it"). Removed anyway, deliberately: for a
+  two-person household there was no funnel-length problem it was solving, and the
+  household preferred always steering via `Craft a recipe` over a coin-flip
+  suggestion. `Craft a recipe` is now the sole entry point on the home screen.
+  A `Planner` button sits alongside it, disabled, as a placeholder ("Coming
+  soon") for a not-yet-built feature — do not wire it up without asking first.
 
 ## Commands
 

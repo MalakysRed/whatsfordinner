@@ -8,13 +8,10 @@ import type { UnitPrefs } from "@/lib/recipe/scale";
 /**
  * The home screen.
  *
- * "Surprise me" is one tap and takes no input: it skips stage 1 entirely with
- * a default effort band and goes straight to eight options generated from
- * silent context alone. Guard that in review — it is the whole reason the
- * app exists, and anything added in front of it is a regression however good
- * it looks. "Craft a recipe" is the entry point into the full build-your-own
- * flow (time band, eight directions, tailoring, three variations, the
- * recipe) for when the household wants to steer rather than be surprised.
+ * "Craft a recipe" is the sole entry point into the flow (time band, eight
+ * directions, tailoring, three variations, the recipe) — the zero-input
+ * "Surprise us/me" tap the PRD opened with has been deliberately removed;
+ * see CLAUDE.md D5. "Planner" is a placeholder for a not-yet-built feature.
  */
 export function HomeClient({
   defaultServings,
@@ -77,16 +74,12 @@ export function HomeClient({
 
       <button
         type="button"
-        onClick={() => {
-          setInput({ effortBand: "standard", needsUsingUp: null });
-          setMode("running");
-        }}
-        className="min-h-32 w-full rounded-3xl bg-accent px-6 py-8 text-left text-on-accent"
+        disabled
+        aria-disabled="true"
+        className="flex min-h-24 w-full flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4 text-left opacity-60"
       >
-        <span className="block text-2xl font-semibold tracking-tight">Surprise me</span>
-        <span className="mt-1 block text-base opacity-90">
-          Eight directions from what you like. No questions.
-        </span>
+        <span className="text-lg font-medium">Planner</span>
+        <span className="mt-0.5 text-sm text-muted">Coming soon</span>
       </button>
     </div>
   );
