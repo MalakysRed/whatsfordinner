@@ -68,6 +68,15 @@ export function HomeClient({
     <div className="space-y-4">
       <button
         type="button"
+        onClick={() => setMode("gate")}
+        className="flex min-h-24 w-full flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4 text-left"
+      >
+        <span className="text-lg font-medium">Craft a recipe</span>
+        <span className="mt-0.5 text-sm text-muted">Guided recipe design</span>
+      </button>
+
+      <button
+        type="button"
         onClick={() => {
           setInput({ effortBand: "standard", needsUsingUp: null });
           setMode("running");
@@ -78,15 +87,6 @@ export function HomeClient({
         <span className="mt-1 block text-base opacity-90">
           Eight directions from what you like. No questions.
         </span>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setMode("gate")}
-        className="flex min-h-24 w-full flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4 text-left"
-      >
-        <span className="text-lg font-medium">Craft a recipe</span>
-        <span className="mt-0.5 text-sm text-muted">Guided recipe design</span>
       </button>
     </div>
   );
