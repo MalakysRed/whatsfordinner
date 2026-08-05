@@ -39,7 +39,7 @@ interface Caller {
   context: HouseholdContext;
 }
 
-const OPTION_COUNT = 6;
+const OPTION_COUNT = 8;
 const VARIATION_COUNT = 3;
 
 const EFFORT_BAND_TEXT: Record<EffortBand, string> = {
@@ -59,14 +59,14 @@ export interface OptionsInput {
   mainIngredient?: string | null;
   /** Free text from stage 1, "anything to use up?" — a soft preference. */
   needsUsingUp?: string | null;
-  /** Titles already rejected this session, not to be repeated. */
-  avoidTitles?: string[] | null;
+  /** Directions already rejected this session, not to be repeated. */
+  avoidDirections?: string[] | null;
   /** Permanent "not this" reactions from previous sessions (spec §5.4). */
   excludedAxes: { axis: string; value: string }[];
   /** Drawn by the caller from seed_pool via variance-engine.drawSeeds. */
   seeds: DrawnSeed[];
-  /** The just-shown six titles, present only on a "Refresh" call. */
-  previousTitles?: string[] | null;
+  /** The just-shown eight directions, present only on a "Refresh" call. */
+  previousDirections?: string[] | null;
 }
 
 function buildOptionsRequestBlock(input: OptionsInput): string {
@@ -77,13 +77,13 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
       `MAIN INGREDIENT — a hard constraint, not a suggestion:\n${wrapUserText(
         "main_ingredient",
         input.mainIngredient,
-      )}\n\nEvery one of the six options must be built around this. Vary the cooking method, cuisine and richness instead — six ways to cook the same ingredient, not six unrelated dishes.`,
+      )}\n\nEvery one of the eight directions must be built around this. Vary the cooking method, cuisine and richness instead — eight ways to take the same ingredient, not eight unrelated dishes.`,
     );
   }
 
   if (input.needsUsingUp?.trim()) {
     parts.push(
-      `ANYTHING TO USE UP — a soft preference, not a hard constraint. Favour it where it fits naturally, but do not force every option to use it. Report which named items each option genuinely uses in uses_named_ingredients:\n${wrapUserText(
+      `ANYTHING TO USE UP — a soft preference, not a hard constraint. Favour it where it fits naturally, but do not force every direction to use it. Report which named items each direction genuinely uses in uses_named_ingredients:\n${wrapUserText(
         "needs_using_up",
         input.needsUsingUp,
       )}`,
@@ -92,7 +92,7 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
 
   if (input.seeds.length > 0) {
     parts.push(
-      `SEEDS — inspiration for AT MOST TWO of the six options, not all of them:\n${input.seeds
+      `SEEDS — inspiration for AT MOST TWO of the eight directions, not all of them:\n${input.seeds
         .map((s) => `- ${s.axis}: ${s.name}`)
         .join("\n")}`,
     );
@@ -106,9 +106,9 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
     );
   }
 
-  if (input.avoidTitles?.length) {
+  if (input.avoidDirections?.length) {
     parts.push(
-      `ALREADY REJECTED — do not offer these again or near-variants of them:\n${input.avoidTitles
+      `ALREADY REJECTED — do not offer these again or near-variants of them:\n${input.avoidDirections
         .map((t) => `- ${t}`)
         .join("\n")}`,
     );
@@ -119,16 +119,16 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
     : "protein, cooking method, cuisine region and richness";
 
   parts.push(
-    `Produce exactly ${OPTION_COUNT} options. They must differ from one another across ${diversityAxes}.`,
+    `Produce exactly ${OPTION_COUNT} short, punchy directions to explore with the main ingredient — not finished dishes and not a title. Each is a mood-board note: a short "direction" phrase (max 80 characters, e.g. "Charred and citrus-bright"), 2-4 flavour descriptors, 2-4 texture descriptors, and 2-5 potential hero ingredients that could anchor it — not locked in yet. They must differ from one another across ${diversityAxes}.`,
   );
 
   return parts.join("\n\n");
 }
 
-/** Six options (stage 2). "Refresh" is this same function with `previousTitles` set. */
+/** Eight directions (stage 2). "Refresh" is this same function with `previousDirections` set. */
 export async function generateOptionSummaries(caller: Caller, input: OptionsInput) {
   const requestBlock = buildOptionsRequestBlock(input);
-  const previousTitles = input.previousTitles ?? [];
+  const previousDirections = input.previousDirections ?? [];
 
   const { data, generationId } = await runGeneration({
     ...caller,
@@ -146,7 +146,7 @@ export async function generateOptionSummaries(caller: Caller, input: OptionsInpu
       for (const option of response.options) {
         const hits = checkOptionForAllergens(option, caller.context.allergens);
         if (hits.length > 0) {
-          return `"${option.title}" contains a declared allergen (${describeHits(hits)}). Every option must avoid these entirely.`;
+          return `"${option.direction}" contains a declared allergen (${describeHits(hits)}). Every option must avoid these entirely.`;
         }
       }
 
@@ -155,18 +155,22 @@ export async function generateOptionSummaries(caller: Caller, input: OptionsInpu
         { ignoreProtein: Boolean(input.mainIngredient?.trim()) },
       );
       if (collisions.length > 0) {
-        const titles = collisions[0].map((i) => `"${response.options[i].title}"`).join(" and ");
-        return `${titles} are too similar. Every option must differ from the others across the required axes.`;
+        const directions = collisions[0]
+          .map((i) => `"${response.options[i].direction}"`)
+          .join(" and ");
+        return `${directions} are too similar. Every option must differ from the others across the required axes.`;
       }
 
-      if (previousTitles.length > 0) {
+      if (previousDirections.length > 0) {
         const duplicates = response.options
-          .map((o) => o.title)
-          .filter((title) => previousTitles.some((prev) => tokenOverlap(title, prev) > 0.5));
+          .map((o) => o.direction)
+          .filter((direction) =>
+            previousDirections.some((prev) => tokenOverlap(direction, prev) > 0.5),
+          );
         if (duplicates.length > 0) {
-          return `these titles are too close to the previous set: ${duplicates.join(
+          return `these directions are too close to the previous set: ${duplicates.join(
             ", ",
-          )}. Produce genuinely different dishes, not renamed variants.`;
+          )}. Produce genuinely different directions, not renamed variants.`;
         }
       }
 
@@ -193,11 +197,13 @@ export async function generateDishComponents(caller: Caller, input: DishComponen
   const { option } = input;
 
   const parts = [
-    `The household picked this dish:
+    `The household picked this direction:
 
-Title: ${option.title}
+Direction: ${option.direction}
 Cuisine: ${option.cuisine}
-Description: ${option.description}
+Flavours: ${option.flavours.join(", ")}
+Textures: ${option.textures.join(", ")}
+Hero ingredients: ${option.hero_ingredients.join(", ")}
 Roughly ${option.effort_minutes} minutes.`,
 
     input.mainIngredient?.trim()
@@ -265,11 +271,13 @@ export async function generateDishVariations(caller: Caller, input: DishVariatio
   const hasSelections = componentSelections && Object.keys(componentSelections).length > 0;
 
   const parts = [
-    `Write three richer variations of this dish the household picked:
+    `Write three richer variations of this direction the household picked:
 
-Title: ${option.title}
+Direction: ${option.direction}
 Cuisine: ${option.cuisine}
-Description: ${option.description}
+Flavours: ${option.flavours.join(", ")}
+Textures: ${option.textures.join(", ")}
+Hero ingredients: ${option.hero_ingredients.join(", ")}
 Roughly ${option.effort_minutes} minutes.`,
 
     hasSelections

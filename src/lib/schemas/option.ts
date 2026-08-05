@@ -1,14 +1,15 @@
 import { z } from "zod";
 
 /**
- * The six-option schema — stage 2 of the generation flow.
+ * The eight-direction schema — stage 2 of the generation flow.
  *
- * Deliberately lightweight: a title, a one-line pitch, and just enough
- * structure for the variance engine to enforce diversity and dedup. Anything
- * heavier (ingredient/sauce detail, technique tags) belongs to a later stage,
- * once the user has actually picked one of the six — generating it for all
- * six here would mean paying for five discarded dishes' worth of detail on
- * every request.
+ * Deliberately lightweight, and deliberately not a dish: a short, punchy
+ * `direction` rather than a title, plus just enough flavour/texture/hero-
+ * ingredient detail for the card to be exploratory rather than a near-finished
+ * recipe. Anything heavier (ingredient/sauce detail, technique tags) belongs
+ * to a later stage, once the user has actually picked one of the eight —
+ * generating it for all eight here would mean paying for seven discarded
+ * directions' worth of detail on every request.
  */
 
 export const richnessSchema = z.enum(["light", "medium", "rich"]);
@@ -22,10 +23,17 @@ export const optionAxesSchema = z.object({
 
 export const optionSchema = z.object({
   id: z.string(),
-  title: z.string(),
-  /** One line, appetising, no jargon. */
-  description: z.string(),
+  /** A short, punchy direction, not a dish name — e.g. "Charred and
+   *  citrus-bright" or "Deep, slow-spiced, warming". Describes where to take
+   *  the main ingredient, not a finished plate. */
+  direction: z.string().max(80),
+  /** 2-4 short descriptors, e.g. ["smoky", "sharp", "sweet-heat"]. */
+  flavours: z.array(z.string()).min(2).max(4),
+  /** 2-4 short descriptors, e.g. ["crisp", "silky", "charred"]. */
+  textures: z.array(z.string()).min(2).max(4),
   cuisine: z.string(),
+  /** 2-5 ingredients this direction could be built around — not locked in. */
+  hero_ingredients: z.array(z.string()).min(2).max(5),
   effort_minutes: z.number().int(),
   axes: optionAxesSchema,
   /**

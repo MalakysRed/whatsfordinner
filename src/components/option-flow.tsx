@@ -32,10 +32,10 @@ type Phase =
   | "error";
 
 /**
- * Stages 2 through 5: six lightweight options, tailor the chosen one, three
- * richer variations informed by that tailoring, then the recipe card. No
- * free-text mutation path once a dish is committed — everything offered on
- * the way there is either the household's own tap or something the model
+ * Stages 2 through 5: eight lightweight directions, tailor the chosen one,
+ * three richer variations informed by that tailoring, then the recipe card.
+ * No free-text mutation path once a dish is committed — everything offered
+ * on the way there is either the household's own tap or something the model
  * generated in response to it.
  */
 export function OptionFlow({
@@ -67,8 +67,8 @@ export function OptionFlow({
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [savedId, setSavedId] = useState<string | null>(null);
 
-  // Every title shown this session, so a stage-2 refresh does not repeat itself.
-  const shownTitles = useRef<string[]>([]);
+  // Every direction shown this session, so a stage-2 refresh does not repeat itself.
+  const shownDirections = useRef<string[]>([]);
   // Whatever async call most recently failed, so "Try again" retries the
   // right thing rather than guessing from state which stage was in flight.
   // Set at each call site via `retry()` below, not inside the callbacks
@@ -81,7 +81,7 @@ export function OptionFlow({
   }, []);
 
   // ---------------------------------------------------------------------
-  // Stage 2 — six options
+  // Stage 2 — eight options
   // ---------------------------------------------------------------------
 
   const generateOptions = useCallback(
@@ -97,8 +97,8 @@ export function OptionFlow({
             effort_band: input.effortBand,
             main_ingredient: input.mainIngredient ?? null,
             needs_using_up: input.needsUsingUp ?? null,
-            avoid_titles: shownTitles.current.slice(-30),
-            previous_titles: refresh ? options.map((o) => o.title) : null,
+            avoid_directions: shownDirections.current.slice(-40),
+            previous_directions: refresh ? options.map((o) => o.direction) : null,
           }),
         });
 
@@ -114,7 +114,7 @@ export function OptionFlow({
 
         const next: Option[] = body.options ?? [];
         setOptions(next);
-        shownTitles.current.push(...next.map((o) => o.title));
+        shownDirections.current.push(...next.map((o) => o.direction));
         setPhase("options");
       } catch {
         setError("Could not reach the app. Check your connection.");
@@ -139,7 +139,7 @@ export function OptionFlow({
       await fetch("/api/options/react", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: option.title }),
+        body: JSON.stringify({ direction: option.direction }),
       });
     } catch {
       // Best effort — the card is already gone from view either way.
@@ -469,12 +469,16 @@ export function OptionFlow({
           }}
           className="min-h-11 text-sm text-muted underline"
         >
-          Back to the six
+          Back to the options
         </button>
 
         <Card className="space-y-2 p-5">
-          <h3 className="text-lg font-semibold leading-tight">{chosenOption.title}</h3>
-          <p className="text-base leading-relaxed text-muted">{chosenOption.description}</p>
+          <h3 className="text-lg font-semibold leading-tight">{chosenOption.direction}</h3>
+          <p className="text-base leading-relaxed text-muted">
+            {chosenOption.flavours.join(" · ")}
+            {chosenOption.textures.length > 0 ? ` — ${chosenOption.textures.join(", ")}` : ""}
+          </p>
+          <p className="text-sm text-muted">{chosenOption.hero_ingredients.join(", ")}</p>
         </Card>
 
         {slots.map((slot) => (
@@ -572,8 +576,18 @@ function OptionCard({
   return (
     <Card className="space-y-2 overflow-hidden p-5">
       <button type="button" onClick={onCommit} className="w-full space-y-2 text-left">
-        <h3 className="text-lg font-semibold leading-tight">{option.title}</h3>
-        <p className="text-base leading-relaxed text-muted">{option.description}</p>
+        <h3 className="text-lg font-semibold leading-tight">{option.direction}</h3>
+        <div className="flex flex-wrap gap-1.5">
+          {[...option.flavours, ...option.textures].map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full border border-line px-2.5 py-0.5 text-xs text-muted"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+        <p className="text-sm text-muted">{option.hero_ingredients.join(", ")}</p>
         <p className="text-sm text-muted">
           {option.cuisine} · {formatMinutes(option.effort_minutes)}
         </p>
@@ -622,7 +636,7 @@ function VariationCard({
 }
 
 const STAGE_LABELS: Record<string, string[]> = {
-  "loading-options": ["Drawing inspiration…", "Ruling out repeats…", "Picking six…"],
+  "loading-options": ["Drawing inspiration…", "Ruling out repeats…", "Picking directions…"],
   "loading-tailor": ["Reading the dish…", "Working out what fits…"],
   "loading-variations": ["Weighing the options…", "Writing three ways to go…"],
   cooking: ["Working out the method…", "Weighing everything…", "Writing the steps…"],

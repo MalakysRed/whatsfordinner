@@ -115,7 +115,7 @@ export const MAX_TOKENS_FOR_CALL: Record<GenerationType, number> = {
   // Headroom for high effort's larger thinking budget, on top of the visible
   // output.
   recipe: 24_000,
-  // Six lightweight cards — title, description, a handful of short fields.
+  // Eight lightweight cards — a direction phrase, flavours/textures, a handful of short fields.
   options: 8_000,
   options_refine: 8_000,
   // A handful of slots, each a short list of named options — cheap either way.

@@ -9,7 +9,7 @@ import type { UnitPrefs } from "@/lib/recipe/scale";
  * The home screen.
  *
  * "Surprise us" is one tap and takes no input: it skips stage 1 entirely with
- * a default effort band and goes straight to six options generated from
+ * a default effort band and goes straight to eight options generated from
  * silent context alone. Guard that in review — it is the whole reason the
  * app exists, and anything added in front of it is a regression however good
  * it looks. "Choose your effort" is the one-question stage-1 gate for when
@@ -75,7 +75,7 @@ export function HomeClient({
       >
         <span className="block text-2xl font-semibold tracking-tight">Surprise us</span>
         <span className="mt-1 block text-base opacity-90">
-          Six dinners from what you like. No questions.
+          Eight directions from what you like. No questions.
         </span>
       </button>
 

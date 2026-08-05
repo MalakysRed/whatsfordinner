@@ -52,9 +52,11 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
 function option(overrides: Partial<Option> = {}): Option {
   return {
     id: "o1",
-    title: "Charred greens with tahini",
-    description: "Quick, sharp, and mostly from the cupboard.",
+    direction: "Charred and citrus-bright",
+    flavours: ["sharp", "smoky"],
+    textures: ["charred", "crisp"],
     cuisine: "Middle Eastern",
+    hero_ingredients: ["chickpeas", "tahini"],
     effort_minutes: 25,
     axes: {
       protein: "chickpeas",
@@ -306,6 +308,21 @@ describe("checkOptionForAllergens", () => {
     );
 
     expect(hits.map((h) => h.location)).toContain("uses_named_ingredients[0]");
+  });
+
+  it("catches an allergen in hero_ingredients", () => {
+    const hits = checkOptionForAllergens(
+      option({ hero_ingredients: ["king prawns", "rice"] }),
+      ["shellfish"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("hero_ingredients[0]");
+  });
+
+  it("catches an allergen in flavours", () => {
+    const hits = checkOptionForAllergens(option({ flavours: ["peanut", "sharp"] }), ["peanuts"]);
+
+    expect(hits.map((h) => h.location)).toContain("flavours[0]");
   });
 
   it("passes a clean option", () => {

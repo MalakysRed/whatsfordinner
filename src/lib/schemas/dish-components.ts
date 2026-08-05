@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Stage 3 — tailoring. Once a dish is picked from the six, this is the model
+ * Stage 3 — tailoring. Once a direction is picked from the eight, this is the model
  * filling in the parts of it that are worth choosing between: which
  * vegetables, which hero herb or spice, which sauce/dressing/gravy, and so
  * on. The model decides which slots make sense for the dish — a curry might

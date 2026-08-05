@@ -54,7 +54,7 @@ export function EffortGate({ onSubmit }: { onSubmit: (input: EffortInput) => voi
           className="w-full rounded-xl border border-line bg-background px-4 py-3 text-base outline-none focus:border-accent"
         />
         <p className="text-sm text-muted">
-          If you set this, all six options will be built around it.
+          If you set this, all eight options will be built around it.
         </p>
       </Card>
 

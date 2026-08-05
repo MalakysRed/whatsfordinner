@@ -9,14 +9,14 @@ import { createClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
   effort_band: z.enum(["quick", "standard", "project"]),
-  /** Pinned at stage 1 — a hard constraint applied to all six options. */
+  /** Pinned at stage 1 — a hard constraint applied to all eight options. */
   main_ingredient: z.string().max(80).nullish(),
   /** Free text from stage 1, "anything to use up?" — a soft preference, never persisted. */
   needs_using_up: z.string().max(500).nullish(),
-  /** Titles rejected this session (not the permanent "not this" list). */
-  avoid_titles: z.array(z.string().max(200)).max(60).nullish(),
-  /** Present on a "Refresh" call — the six titles just shown, to avoid repeating. */
-  previous_titles: z.array(z.string().max(200)).max(6).nullish(),
+  /** Directions rejected this session (not the permanent "not this" list). */
+  avoid_directions: z.array(z.string().max(80)).max(80).nullish(),
+  /** Present on a "Refresh" call — the eight directions just shown, to avoid repeating. */
+  previous_directions: z.array(z.string().max(80)).max(8).nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
       effortBand: body.effort_band,
       mainIngredient: body.main_ingredient,
       needsUsingUp: body.needs_using_up,
-      avoidTitles: body.avoid_titles,
-      previousTitles: body.previous_titles,
+      avoidDirections: body.avoid_directions,
+      previousDirections: body.previous_directions,
       excludedAxes,
       seeds,
     });

@@ -81,12 +81,12 @@ function drawOne(
 /**
  * The four axes must genuinely differ across the option set (spec §5.1c) — no
  * two options may share an identical protein+method+cuisine combination. This
- * is the floor that stops "six variations on one idea"; the model is also
+ * is the floor that stops "eight variations on one idea"; the model is also
  * instructed to vary richness, which is harder to check mechanically and is
  * left to the prompt.
  *
  * `ignoreProtein` drops protein from the comparison — used when a main
- * ingredient has been pinned, since all six options share it by design and
+ * ingredient has been pinned, since all eight options share it by design and
  * the collision check would otherwise trip on the very field the user chose.
  */
 export function findAxesCollisions(

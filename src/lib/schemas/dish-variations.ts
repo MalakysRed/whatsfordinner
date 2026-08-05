@@ -8,8 +8,8 @@ import { z } from "zod";
  * relative to the full recipe card that follows.
  *
  * Deliberately not diversity-checked against each other the way the stage-2
- * six are — the point here is variation on a chosen theme, not genre spread,
- * so all three may reasonably share a cuisine and method.
+ * eight are — the point here is variation on a chosen theme, not genre
+ * spread, so all three may reasonably share a cuisine and method.
  */
 
 export const refinedOptionSchema = z.object({
