@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Card, Pill } from "@/components/ui";
+import { Card } from "@/components/ui";
 import { CookingMode, type CookingStep } from "@/components/cooking-mode";
 import { saveRecipe } from "@/app/(app)/book/actions";
 import { addRecipeToList } from "@/app/(app)/shop/actions";
@@ -15,7 +15,7 @@ import {
   type UnitPrefs,
 } from "@/lib/recipe/scale";
 import type { Recipe } from "@/lib/schemas/recipe";
-import type { Suggestion } from "@/lib/schemas/suggestion";
+import type { RefinedOption } from "@/lib/schemas/dish-variations";
 
 /**
  * Metric/imperial for the on-card toggle, folded into one flip rather than
@@ -41,26 +41,23 @@ function effectivePrefs(base: UnitPrefs, useImperial: boolean): UnitPrefs {
  *
  * `recipe` is the starting point, not the only thing ever shown: an
  * accepted "re-check this recipe" offer (FR5.4) replaces it with a revised
- * version from `/api/recipe/revise`, kept as local state. `suggestion` is
- * only present in the live generation flow — it's what the revise call needs
- * — so it's optional and the re-check offer simply doesn't appear when the
- * card is opened from the saved recipe book instead.
+ * version from `/api/recipe/revise`, kept as local state. `option` is only
+ * present in the live generation flow — it's what the revise call needs — so
+ * it's optional and the re-check offer simply doesn't appear when the card is
+ * opened from the saved recipe book instead.
  */
 export function RecipeCard({
   recipe: initialRecipe,
-  suggestion = null,
+  option = null,
   unitPrefs = METRIC_PREFS,
   recipeId,
-  batchCooking,
   onSaved,
 }: {
   recipe: Recipe;
-  suggestion?: Suggestion | null;
+  option?: RefinedOption | null;
   unitPrefs?: UnitPrefs;
   /** The saved recipe's id, when there is one — keys cooking mode's ticked-step persistence. */
   recipeId?: string;
-  /** Carried through to the re-check/revise call (only relevant while `suggestion` is set). */
-  batchCooking?: boolean | null;
   /**
    * Fired if this card has to save the recipe itself in order to add it to
    * the shopping list (FR9.2) — lets a caller with its own "Save to book"
@@ -81,7 +78,6 @@ export function RecipeCard({
   const [listError, setListError] = useState<string | null>(null);
 
   const prefs = effectivePrefs(unitPrefs, useImperial);
-  const notInBank = recipe.ingredients.filter((i) => !i.in_bank);
 
   // Scale first, then convert for display — scaling operates on the
   // canonical metric amount (FR5.1); conversion is purely cosmetic and never
@@ -133,7 +129,7 @@ export function RecipeCard({
       let id = recipeId;
 
       if (!id) {
-        const saved = await saveRecipe(recipe, suggestion?.id ?? null, null, false);
+        const saved = await saveRecipe(recipe, option?.id ?? null, null, false);
         if (!saved.ok || !saved.recipeId) {
           setListError(saved.error ?? "Could not save the recipe.");
           return;
@@ -154,7 +150,7 @@ export function RecipeCard({
   }
 
   async function recheck() {
-    if (!suggestion) return;
+    if (!option) return;
     setRevising(true);
     setReviseError(null);
 
@@ -162,13 +158,7 @@ export function RecipeCard({
       const response = await fetch("/api/recipe/revise", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          suggestion,
-          previous: recipe,
-          servings,
-          feedback: null,
-          batch_cooking: batchCooking ?? null,
-        }),
+        body: JSON.stringify({ option, previous: recipe, servings }),
       });
       const body = await response.json();
 
@@ -260,7 +250,7 @@ export function RecipeCard({
           </p>
         )}
 
-        {showRecheck && suggestion && (
+        {showRecheck && option && (
           <Card className="space-y-3 p-4">
             <p className="text-sm leading-relaxed">
               That&rsquo;s a big change in servings — pan sizes and seasoning may
@@ -319,21 +309,9 @@ export function RecipeCard({
                   <span className="text-muted"> (optional)</span>
                 )}
               </span>
-              {!ingredient.in_bank && (
-                <span className="ml-auto shrink-0">
-                  <Pill>New</Pill>
-                </span>
-              )}
             </div>
           ))}
         </Card>
-
-        {notInBank.length > 0 && (
-          <p className="text-sm text-muted">
-            {notInBank.length === 1 ? "One thing is" : `${notInBank.length} things are`}{" "}
-            not in your bank yet.
-          </p>
-        )}
       </section>
 
       <section className="space-y-3">

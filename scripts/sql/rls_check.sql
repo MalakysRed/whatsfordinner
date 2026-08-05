@@ -2,8 +2,9 @@
 -- policies read correctly.
 --
 -- The assertion that matters is CHECK 5: household B querying household A's
--- ingredients gets zero rows from the database itself, not filtered results from
--- application code. Everything else here exists to make that one meaningful.
+-- preference exclusions gets zero rows from the database itself, not filtered
+-- results from application code. Everything else here exists to make that one
+-- meaningful.
 --
 -- Note on style: psql does not interpolate :variables inside dollar-quoted
 -- blocks, so assertions inside DO blocks look things up by name rather than
@@ -87,33 +88,11 @@ $$;
 \echo 'ok 3: household bootstrap seeded settings and equipment'
 
 -- ---------------------------------------------------------------------------
--- CHECK 4: adopting the starter set fills the bank (FR3.4)
+-- CHECK 4: household data exists to isolate — a recipe and some permanent
+-- "not this" exclusions from the variance engine, both belonging to A.
 -- ---------------------------------------------------------------------------
 
 select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false) \gset dummy_c_
-select adopt_starter_ingredients();
-
-do $$
-declare
-  adopted integer;
-begin
-  select count(*) into adopted
-  from ingredients
-  where household_id = (select id from households where name = 'Bray kitchen');
-
-  if adopted < 100 then
-    raise exception 'FAIL check 4: starter set adopted only % ingredients', adopted;
-  end if;
-
-  -- Staples came across as staples; they are what keeps shopping lists short.
-  if not exists (
-    select 1 from ingredients
-    where name = 'Flaky sea salt' and staple
-  ) then
-    raise exception 'FAIL check 4: staple flags were not carried over';
-  end if;
-end
-$$;
 
 -- A recipe belonging to household A, used by the isolation checks below.
 insert into recipes (household_id, created_by, title, base_servings, payload)
@@ -125,7 +104,22 @@ values (
   '{"title": "Secret family chilli"}'::jsonb
 );
 
-\echo 'ok 4: starter set adopted with flags intact'
+insert into preference_exclusions (household_id, axis, value, reaction)
+select :'household_a', axis::exclusion_axis, value, 'excluded'::exclusion_reaction
+from (values ('protein', 'liver'), ('cuisine', 'fusion')) as seed(axis, value);
+
+do $$
+begin
+  if (
+    select count(*) from preference_exclusions
+    where household_id = (select id from households where name = 'Bray kitchen')
+  ) <> 2 then
+    raise exception 'FAIL check 4: preference exclusions were not recorded for household A';
+  end if;
+end
+$$;
+
+\echo 'ok 4: household A has a recipe and preference exclusions to isolate'
 
 -- ---------------------------------------------------------------------------
 -- CHECK 5: RLS blocks cross-household reads
@@ -139,20 +133,20 @@ select set_config('test.user_id', '22222222-2222-2222-2222-222222222222', false)
 
 do $$
 declare
-  visible_ingredients integer;
+  visible_exclusions integer;
   visible_recipes integer;
   visible_settings integer;
   visible_households integer;
 begin
-  select count(*) into visible_ingredients from ingredients;
+  select count(*) into visible_exclusions from preference_exclusions;
   select count(*) into visible_recipes from recipes;
   select count(*) into visible_settings from settings;
   select count(*) into visible_households from households;
 
-  if visible_ingredients <> 0 then
+  if visible_exclusions <> 0 then
     raise exception
-      'FAIL check 5: household B can see % of household A''s ingredients',
-      visible_ingredients;
+      'FAIL check 5: household B can see % of household A''s preference exclusions',
+      visible_exclusions;
   end if;
 
   if visible_recipes <> 0 then
@@ -183,8 +177,8 @@ $$;
 -- ---------------------------------------------------------------------------
 
 \set ON_ERROR_STOP off
-insert into ingredients (household_id, name, category)
-values (:'household_a', 'Trojan horse', 'vegetable');
+insert into preference_exclusions (household_id, axis, value, reaction)
+values (:'household_a', 'protein', 'Trojan horse', 'excluded');
 \set ON_ERROR_STOP on
 
 -- ---------------------------------------------------------------------------
@@ -221,8 +215,8 @@ select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false)
 
 do $$
 begin
-  if (select count(*) from ingredients) < 100 then
-    raise exception 'FAIL check 8: household A cannot see its own ingredient bank';
+  if (select count(*) from preference_exclusions) <> 2 then
+    raise exception 'FAIL check 8: household A cannot see its own preference exclusions';
   end if;
   if (select count(*) from recipes) <> 1 then
     raise exception 'FAIL check 8: household A cannot see its own recipe';
@@ -238,8 +232,8 @@ reset role;
 -- as superuser, because under RLS household B could not see it either way.
 do $$
 begin
-  if exists (select 1 from ingredients where name = 'Trojan horse') then
-    raise exception 'FAIL check 6: household B wrote into household A''s bank';
+  if exists (select 1 from preference_exclusions where value = 'Trojan horse') then
+    raise exception 'FAIL check 6: household B wrote into household A''s exclusions';
   end if;
 end
 $$;

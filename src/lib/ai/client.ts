@@ -45,6 +45,13 @@ export interface GenerationRequest<T extends z.ZodType> {
   context: HouseholdContext;
   /** The uncached, per-call half of the prompt. */
   requestBlock: string;
+  /**
+   * Extra bookkeeping merged into the logged `request` row alongside the
+   * prompt text — currently just the seeds drawn for an options call, so the
+   * variance engine can exclude them from a household's next three
+   * generations without a dedicated table (src/lib/generation/variance-engine.ts).
+   */
+  requestMeta?: Record<string, unknown>;
   schema: T;
   /**
    * Validates a parsed response beyond its shape — the allergen guardrail and
@@ -223,6 +230,7 @@ interface LogInput {
   succeeded: boolean;
   error: string | null;
   requestBlock: string;
+  requestMeta?: Record<string, unknown>;
   response: unknown;
   usage: TokenUsage | null;
 }
@@ -250,7 +258,7 @@ async function logGeneration(input: LogInput): Promise<string> {
       latency_ms: input.latencyMs,
       cost_usd:
         model && input.usage ? estimateCostUsd(model, input.usage) : null,
-      request: { prompt: input.requestBlock },
+      request: { prompt: input.requestBlock, ...input.requestMeta },
       response: input.response ?? null,
       succeeded: input.succeeded,
       error: input.error,

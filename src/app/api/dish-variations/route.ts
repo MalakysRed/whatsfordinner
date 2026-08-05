@@ -1,20 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { generateRecipe } from "@/lib/ai/generate";
+import { generateDishVariations } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
-import { recipeSchema } from "@/lib/schemas/recipe";
-import { refinedOptionSchema } from "@/lib/schemas/dish-variations";
+import { optionSchema } from "@/lib/schemas/option";
 
-/**
- * Re-checks a card at a new serving count when it moves by more than a
- * factor of two (FR5.4). This is a recalculation, not a mutation of the
- * dish — the "no free-text mutation once committed" rule is about changing
- * what the dish *is*, not about servings, which is always adjustable.
- */
+/** Stage 4 — three richer variations of the picked dish, informed by the stage-3 tailoring choices. */
 const bodySchema = z.object({
-  option: refinedOptionSchema,
-  previous: recipeSchema,
-  servings: z.number().int().min(1).max(12),
+  option: optionSchema,
   component_selections: z.record(z.string(), z.string()).nullish(),
   main_ingredient: z.string().max(80).nullish(),
   needs_using_up: z.string().max(500).nullish(),
@@ -32,18 +24,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { recipe, generationId } = await generateRecipe(caller, {
+    const result = await generateDishVariations(caller, {
       option: parsed.data.option,
-      servings: parsed.data.servings,
-      previous: parsed.data.previous,
       componentSelections: parsed.data.component_selections,
       mainIngredient: parsed.data.main_ingredient,
       needsUsingUp: parsed.data.needs_using_up,
     });
 
     return NextResponse.json({
-      recipe,
-      generation_id: generationId,
+      options: result.options,
+      generation_id: result.generationId,
       remaining_today: caller.remaining - 1,
     });
   } catch (error) {

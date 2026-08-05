@@ -42,7 +42,6 @@ export const recipeIngredientSchema = z.object({
   component: componentSchema,
   scales: scalesSchema,
   optional: z.boolean(),
-  in_bank: z.boolean(),
 });
 
 export const recipeStepSchema = z.object({

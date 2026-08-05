@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CUISINES } from "../build/builder";
+import { CUISINES } from "@/lib/cuisines";
 
 /**
  * Filters live in the URL (shareable, back-button-friendly) rather than

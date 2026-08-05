@@ -1,23 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { generateRecipe } from "@/lib/ai/generate";
+import { generateDishComponents } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
-import { recipeSchema } from "@/lib/schemas/recipe";
-import { refinedOptionSchema } from "@/lib/schemas/dish-variations";
+import { optionSchema } from "@/lib/schemas/option";
 
-/**
- * Re-checks a card at a new serving count when it moves by more than a
- * factor of two (FR5.4). This is a recalculation, not a mutation of the
- * dish — the "no free-text mutation once committed" rule is about changing
- * what the dish *is*, not about servings, which is always adjustable.
- */
+/** Stage 3 — tailoring suggestions (vegetables, hero herb/spice, sauce, ...) for the one dish picked at stage 2. */
 const bodySchema = z.object({
-  option: refinedOptionSchema,
-  previous: recipeSchema,
-  servings: z.number().int().min(1).max(12),
-  component_selections: z.record(z.string(), z.string()).nullish(),
+  option: optionSchema,
   main_ingredient: z.string().max(80).nullish(),
   needs_using_up: z.string().max(500).nullish(),
+  /** Present on the "refresh the rest to match" follow-up after a slot changes. */
+  locked: z.object({ slot: z.string().max(60), value: z.string().max(200) }).nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -32,18 +25,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { recipe, generationId } = await generateRecipe(caller, {
+    const result = await generateDishComponents(caller, {
       option: parsed.data.option,
-      servings: parsed.data.servings,
-      previous: parsed.data.previous,
-      componentSelections: parsed.data.component_selections,
       mainIngredient: parsed.data.main_ingredient,
       needsUsingUp: parsed.data.needs_using_up,
+      locked: parsed.data.locked,
     });
 
     return NextResponse.json({
-      recipe,
-      generation_id: generationId,
+      slots: result.slots,
+      generation_id: result.generationId,
       remaining_today: caller.remaining - 1,
     });
   } catch (error) {

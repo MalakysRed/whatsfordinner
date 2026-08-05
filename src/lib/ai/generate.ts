@@ -5,27 +5,31 @@ import {
   recipeSchema,
   type Recipe,
 } from "@/lib/schemas/recipe";
+import { optionsResponseSchema, type Option } from "@/lib/schemas/option";
 import {
-  flavoursResponseSchema,
-  plateOptionsResponseSchema,
-  suggestionsResponseSchema,
-  needsNothingExtra,
-  type Suggestion,
-} from "@/lib/schemas/suggestion";
+  dishComponentsResponseSchema,
+  type ComponentSlot,
+} from "@/lib/schemas/dish-components";
 import {
+  refinedOptionsResponseSchema,
+  type RefinedOption,
+} from "@/lib/schemas/dish-variations";
+import {
+  checkDishComponentsForAllergens,
+  checkOptionForAllergens,
   checkRecipeForAllergens,
-  checkSuggestionForAllergens,
+  checkRefinedOptionForAllergens,
   describeHits,
 } from "./guardrails/allergen";
 import { runGeneration } from "./client";
-import {
-  BATCH_COOKING_INSTRUCTION,
-  buildRequestBlock,
-  wrapUserText,
-  type BuilderConstraints,
-} from "./prompts/system";
+import { wrapUserText } from "./prompts/system";
 import type { HouseholdContext } from "./prompts/context";
-import { isInBank, namesNotInBank } from "@/lib/generation/bank-match";
+import {
+  findAxesCollisions,
+  tokenOverlap,
+  type DrawnSeed,
+  type EffortBand,
+} from "@/lib/generation/variance-engine";
 import type { MealType } from "@/lib/db/types";
 
 interface Caller {
@@ -35,155 +39,134 @@ interface Caller {
   context: HouseholdContext;
 }
 
-/** Six to eight flavour layers for the builder (PRD 7.2.5). */
-export async function generateFlavours(
-  caller: Caller,
-  input: {
-    cuisine?: string | null;
-    dishType?: string | null;
-    tasteProfile?: string[] | null;
-    components: string[];
-    batchCooking?: boolean | null;
-  },
-) {
-  const described = input.components.filter(Boolean).join(", ");
+const OPTION_COUNT = 6;
+const VARIATION_COUNT = 3;
 
-  const requestBlock = [
-    input.cuisine ? `CUISINE: ${input.cuisine}` : null,
-    input.dishType ? `DISH TYPE: ${input.dishType}` : null,
-    input.tasteProfile?.length
-      ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
-      : null,
-    described ? `CHOSEN SO FAR: ${described}` : null,
-    input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
-    "Suggest six to eight flavour layers that would suit this — sauces, dressings, dips, rubs, marinades or pickles. Name each one properly and give one line describing what is in it and what it tastes like, in the style of \"Nam jim: fish sauce, lime, chilli, palm sugar. Sharp and hot.\" These do not all need to be things the household already has — mix in some that would need a shop, so the options aren't the same handful of pantry staples every time.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+const EFFORT_BAND_TEXT: Record<EffortBand, string> = {
+  quick: "around 20 minutes, minimal washing up",
+  standard: "45 to 60 minutes, a proper cook",
+  project: "an evening, actively enjoyable",
+};
 
-  const { data, generationId } = await runGeneration({
-    ...caller,
-    type: "flavour",
-    requestBlock,
-    schema: flavoursResponseSchema,
-  });
+// ---------------------------------------------------------------------------
+// Stage 2 — six lightweight options
+// ---------------------------------------------------------------------------
 
-  return { flavours: data.flavours, generationId };
+export interface OptionsInput {
+  effortBand: EffortBand;
+  /** Pinned by the user at stage 1 — a hard constraint, not a nudge: every
+   *  option is built around it, varying method/cuisine/richness instead. */
+  mainIngredient?: string | null;
+  /** Free text from stage 1, "anything to use up?" — a soft preference. */
+  needsUsingUp?: string | null;
+  /** Titles already rejected this session, not to be repeated. */
+  avoidTitles?: string[] | null;
+  /** Permanent "not this" reactions from previous sessions (spec §5.4). */
+  excludedAxes: { axis: string; value: string }[];
+  /** Drawn by the caller from seed_pool via variance-engine.drawSeeds. */
+  seeds: DrawnSeed[];
+  /** The just-shown six titles, present only on a "Refresh" call. */
+  previousTitles?: string[] | null;
 }
 
-/**
- * Options for the rest of the plate — a complex carb, a healthy fat, and
- * vegetables or fruit — offered before the flavour layer step (PRD 7.2's
- * builder redesign). Bank-first: the household block already excludes
- * disliked and allergen ingredients, so a truthful model naturally leaves
- * them out, but it may still suggest something outside the bank when nothing
- * in it fits. `in_bank` is still recomputed here against the real bank
- * rather than trusted outright — the same belt-and-suspenders move as the
- * allergen guardrail, since even a model that can see the list can still get
- * one entry wrong.
- */
-export async function generatePlateOptions(
-  caller: Caller,
-  input: {
-    protein?: string | null;
-    dishType?: string | null;
-    tasteProfile?: string[] | null;
-    cuisine?: string | null;
-    batchCooking?: boolean | null;
-  },
-) {
-  const requestBlock = [
-    input.protein ? `PROTEIN: ${input.protein}` : null,
-    input.dishType ? `DISH TYPE: ${input.dishType}` : null,
-    input.tasteProfile?.length
-      ? `TASTE PROFILE: ${input.tasteProfile.join(", ")}`
-      : null,
-    input.cuisine ? `CUISINE: ${input.cuisine}` : null,
-    input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
-    "Suggest the rest of the plate to go with this: a complex carb, a healthy fat, and some non-starchy vegetables or fruit. Give four to six options each for carbs and fats, and eight to twelve for vegetables and fruit. Favour what the household's bank already has and set in_bank accordingly — you may include something outside it when nothing in the bank really fits, but say so honestly rather than marking it in_bank.\n\nEach option must be a single plain ingredient on its own — no combinations, no seasoning or preparation attached. Write \"Carrots\", not \"Carrots with oregano butter\"; \"Wild rice\", not \"Wild rice pilaf\".",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+function buildOptionsRequestBlock(input: OptionsInput): string {
+  const parts: string[] = [`EFFORT BAND: ${EFFORT_BAND_TEXT[input.effortBand]}`];
 
-  const { data, generationId } = await runGeneration({
-    ...caller,
-    type: "plate",
-    requestBlock,
-    schema: plateOptionsResponseSchema,
-    validate: (response) => {
-      const offender = [...response.carbs, ...response.fats, ...response.veg].find((option) =>
-        looksLikeAPreparedDish(option.name),
-      );
+  if (input.mainIngredient?.trim()) {
+    parts.push(
+      `MAIN INGREDIENT — a hard constraint, not a suggestion:\n${wrapUserText(
+        "main_ingredient",
+        input.mainIngredient,
+      )}\n\nEvery one of the six options must be built around this. Vary the cooking method, cuisine and richness instead — six ways to cook the same ingredient, not six unrelated dishes.`,
+    );
+  }
 
-      if (offender) {
-        return `"${offender.name}" reads like a prepared dish, not a plain ingredient. Every option must be a single ingredient by itself — no combinations, no seasoning or preparation attached.`;
-      }
+  if (input.needsUsingUp?.trim()) {
+    parts.push(
+      `ANYTHING TO USE UP — a soft preference, not a hard constraint. Favour it where it fits naturally, but do not force every option to use it. Report which named items each option genuinely uses in uses_named_ingredients:\n${wrapUserText(
+        "needs_using_up",
+        input.needsUsingUp,
+      )}`,
+    );
+  }
 
-      return null;
-    },
-  });
+  if (input.seeds.length > 0) {
+    parts.push(
+      `SEEDS — inspiration for AT MOST TWO of the six options, not all of them:\n${input.seeds
+        .map((s) => `- ${s.axis}: ${s.name}`)
+        .join("\n")}`,
+    );
+  }
 
-  const withRealBank = <T extends { name: string }>(options: T[]) =>
-    options.map((option) => ({ ...option, in_bank: isInBank(option.name, caller.context.ingredients) }));
+  if (input.excludedAxes.length > 0) {
+    parts.push(
+      `PERMANENTLY EXCLUDED — the household has said "not this" before; never offer these again:\n${input.excludedAxes
+        .map((e) => `- ${e.axis}: ${e.value}`)
+        .join("\n")}`,
+    );
+  }
 
-  return {
-    carbs: withRealBank(data.carbs),
-    fats: withRealBank(data.fats),
-    veg: withRealBank(data.veg),
-    generationId,
-  };
-}
+  if (input.avoidTitles?.length) {
+    parts.push(
+      `ALREADY REJECTED — do not offer these again or near-variants of them:\n${input.avoidTitles
+        .map((t) => `- ${t}`)
+        .join("\n")}`,
+    );
+  }
 
-/** Catches "Carrots with oregano butter" style responses a plain-ingredient prompt should never produce. */
-function looksLikeAPreparedDish(name: string): boolean {
-  if (name.trim().split(/\s+/).length > 3) return true;
-  return /\b(with|and|in|dressed|topped|glazed|marinated|drizzled)\b/i.test(name);
-}
+  const diversityAxes = input.mainIngredient?.trim()
+    ? "method, cuisine region and richness"
+    : "protein, cooking method, cuisine region and richness";
 
-/** Every ingredient a suggestion actually names — the small, fixed set on `components`. */
-function namedComponents(components: Suggestion["components"]): string[] {
-  return [components.protein, components.fat, components.carb, ...components.veg].filter(
-    (name): name is string => Boolean(name),
+  parts.push(
+    `Produce exactly ${OPTION_COUNT} options. They must differ from one another across ${diversityAxes}.`,
   );
+
+  return parts.join("\n\n");
 }
 
-/**
- * Three suggestions.
- *
- * The allergen check runs here as well as on the recipe card — catching it at
- * the suggestion stage saves generating a card that would only be thrown away.
- */
-export async function generateSuggestions(
-  caller: Caller,
-  constraints: BuilderConstraints,
-) {
-  const requestBlock = buildRequestBlock({
-    ...constraints,
-    newIdeaSlots: constraints.newIdeaSlots ?? 3,
-  });
+/** Six options (stage 2). "Refresh" is this same function with `previousTitles` set. */
+export async function generateOptionSummaries(caller: Caller, input: OptionsInput) {
+  const requestBlock = buildOptionsRequestBlock(input);
+  const previousTitles = input.previousTitles ?? [];
 
   const { data, generationId } = await runGeneration({
     ...caller,
-    type: "suggestions",
+    type: "options",
     requestBlock,
-    schema: suggestionsResponseSchema,
+    // Read back by the route to exclude these seeds from the household's
+    // next three generations — see client.ts's requestMeta doc.
+    requestMeta: { seeds: input.seeds.map((s) => s.name) },
+    schema: optionsResponseSchema,
     validate: (response) => {
-      const wanted = constraints.newIdeaSlots ?? 3;
-
-      // An infeasible "needs using up" is a legitimate answer, not a failure —
-      // the PRD would rather say so plainly than invent a dish that does not work.
-      if (response.infeasible_reason && response.suggestions.length === 0) {
-        return null;
+      if (response.options.length !== OPTION_COUNT) {
+        return `you returned ${response.options.length} options but exactly ${OPTION_COUNT} were required.`;
       }
 
-      if (response.suggestions.length !== wanted) {
-        return `you returned ${response.suggestions.length} suggestions but exactly ${wanted} were required.`;
-      }
-
-      for (const suggestion of response.suggestions) {
-        const hits = checkSuggestionForAllergens(suggestion, caller.context.allergens);
+      for (const option of response.options) {
+        const hits = checkOptionForAllergens(option, caller.context.allergens);
         if (hits.length > 0) {
-          return `"${suggestion.title}" contains a declared allergen (${describeHits(hits)}). Every suggestion must avoid these entirely.`;
+          return `"${option.title}" contains a declared allergen (${describeHits(hits)}). Every option must avoid these entirely.`;
+        }
+      }
+
+      const collisions = findAxesCollisions(
+        response.options.map((o) => o.axes),
+        { ignoreProtein: Boolean(input.mainIngredient?.trim()) },
+      );
+      if (collisions.length > 0) {
+        const titles = collisions[0].map((i) => `"${response.options[i].title}"`).join(" and ");
+        return `${titles} are too similar. Every option must differ from the others across the required axes.`;
+      }
+
+      if (previousTitles.length > 0) {
+        const duplicates = response.options
+          .map((o) => o.title)
+          .filter((title) => previousTitles.some((prev) => tokenOverlap(title, prev) > 0.5));
+        if (duplicates.length > 0) {
+          return `these titles are too close to the previous set: ${duplicates.join(
+            ", ",
+          )}. Produce genuinely different dishes, not renamed variants.`;
         }
       }
 
@@ -191,95 +174,216 @@ export async function generateSuggestions(
     },
   });
 
-  // Recomputed against the real bank rather than trusted outright — the same
-  // belt-and-suspenders move as the allergen guardrail. (Deferred: dropping
-  // ingredients_not_in_bank from what Claude is asked to produce entirely,
-  // since this always overwrites it anyway, is an optional follow-up to test
-  // locally after deployment rather than land sight-unseen.)
-  const withRealBank = data.suggestions.map((suggestion) => ({
-    ...suggestion,
-    ingredients_not_in_bank: namesNotInBank(namedComponents(suggestion.components), caller.context.ingredients),
-  }));
-
-  // "Nothing to buy" sorts first (FR11.3).
-  const suggestions = [...withRealBank].sort((a, b) => {
-    const aClean = needsNothingExtra(a) ? 0 : 1;
-    const bClean = needsNothingExtra(b) ? 0 : 1;
-    return aClean - bClean;
-  });
-
-  return {
-    suggestions,
-    infeasibleReason: data.infeasible_reason,
-    wouldUnlock: data.would_unlock,
-    generationId,
-  };
+  return { options: data.options, generationId };
 }
 
-/**
- * The full recipe card for a chosen suggestion.
- *
- * Two things can reject a card here: an allergen, and a step that references an
- * ingredient id that does not exist. The second matters because the whole
- * scaling design rests on those references resolving — a dangling one renders as
- * literal curly braces in front of someone holding a knife.
- */
+// ---------------------------------------------------------------------------
+// Stage 3 — tailoring: component slots for the one dish picked at stage 2
+// ---------------------------------------------------------------------------
+
+export interface DishComponentsInput {
+  option: Option;
+  mainIngredient?: string | null;
+  needsUsingUp?: string | null;
+  /** Present when called as the "refresh the rest to match" follow-up. */
+  locked?: { slot: string; value: string } | null;
+}
+
+export async function generateDishComponents(caller: Caller, input: DishComponentsInput) {
+  const { option } = input;
+
+  const parts = [
+    `The household picked this dish:
+
+Title: ${option.title}
+Cuisine: ${option.cuisine}
+Description: ${option.description}
+Roughly ${option.effort_minutes} minutes.`,
+
+    input.mainIngredient?.trim()
+      ? `MAIN INGREDIENT: ${wrapUserText("main_ingredient", input.mainIngredient)}`
+      : null,
+
+    input.needsUsingUp?.trim()
+      ? `ANYTHING TO USE UP: ${wrapUserText("needs_using_up", input.needsUsingUp)}`
+      : null,
+
+    input.locked
+      ? `The household has already chosen "${input.locked.value}" for the ${input.locked.slot} slot. Suggest the remaining slots to genuinely pair with that choice, and repeat the ${input.locked.slot} slot unchanged with that as its only option.`
+      : null,
+
+    `Suggest two to five slots that are genuinely worth choosing between for this specific dish — vegetables, a hero herb or spice, a sauce/dressing/gravy, or whatever else actually varies it. Not every dish needs every kind of slot; only include what applies to this one. For each slot, give two to six named options with a short note on why each works or what it pairs with. Every option must still be true to the dish above, not turn it into a different dish.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const { data, generationId } = await runGeneration({
+    ...caller,
+    type: "dish_components",
+    requestBlock: parts,
+    schema: dishComponentsResponseSchema,
+    validate: (response) => {
+      const hits = checkDishComponentsForAllergens(response, caller.context.allergens);
+      if (hits.length > 0) {
+        return `these suggestions contain a declared allergen (${describeHits(hits)}). Every option in every slot must avoid these entirely.`;
+      }
+      return null;
+    },
+  });
+
+  return { slots: data.slots as ComponentSlot[], generationId };
+}
+
+// ---------------------------------------------------------------------------
+// Stage 4 — three richer variations, informed by the stage-3 tailoring
+// ---------------------------------------------------------------------------
+
+export interface DishVariationsInput {
+  option: Option;
+  /** Slot → chosen value from stage 3. May be empty or partial. */
+  componentSelections?: Record<string, string> | null;
+  mainIngredient?: string | null;
+  needsUsingUp?: string | null;
+}
+
+/** Pairwise near-duplicate check among a small set — used for the three variations,
+ *  which are meant to vary on a theme but not repeat each other outright. */
+function findPairwiseDuplicates(titles: string[], threshold = 0.5): [number, number][] {
+  const pairs: [number, number][] = [];
+  for (let i = 0; i < titles.length; i++) {
+    for (let j = i + 1; j < titles.length; j++) {
+      if (tokenOverlap(titles[i], titles[j]) > threshold || tokenOverlap(titles[j], titles[i]) > threshold) {
+        pairs.push([i, j]);
+      }
+    }
+  }
+  return pairs;
+}
+
+export async function generateDishVariations(caller: Caller, input: DishVariationsInput) {
+  const { option, componentSelections } = input;
+  const hasSelections = componentSelections && Object.keys(componentSelections).length > 0;
+
+  const parts = [
+    `Write three richer variations of this dish the household picked:
+
+Title: ${option.title}
+Cuisine: ${option.cuisine}
+Description: ${option.description}
+Roughly ${option.effort_minutes} minutes.`,
+
+    hasSelections
+      ? `THE HOUSEHOLD CHOSE:\n${Object.entries(componentSelections!)
+          .map(([slot, value]) => `- ${slot}: ${value}`)
+          .join("\n")}\n\nEvery variation must genuinely reflect these choices, not just mention them in passing.`
+      : "The household did not pick specific components — use your judgement for what suits the dish best.",
+
+    input.mainIngredient?.trim()
+      ? `MAIN INGREDIENT: ${wrapUserText("main_ingredient", input.mainIngredient)}`
+      : null,
+
+    input.needsUsingUp?.trim()
+      ? `ANYTHING TO USE UP: ${wrapUserText(
+          "needs_using_up",
+          input.needsUsingUp,
+        )}\n\nReport which of these each variation genuinely uses in uses_named_ingredients.`
+      : null,
+
+    `Produce exactly three variations. They should feel like genuine alternatives on this one dish — different balances of hero ingredient, different flavour emphasis — not three near-identical rewrites of the same sentence. Each needs a title, a one-line description, its hero ingredients, and a short list of flavour descriptors (e.g. "smoky", "sharp", "sweet-heat").`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const { data, generationId } = await runGeneration({
+    ...caller,
+    type: "dish_variations",
+    requestBlock: parts,
+    schema: refinedOptionsResponseSchema,
+    validate: (response) => {
+      if (response.options.length !== VARIATION_COUNT) {
+        return `you returned ${response.options.length} variations but exactly ${VARIATION_COUNT} were required.`;
+      }
+
+      for (const variation of response.options) {
+        const hits = checkRefinedOptionForAllergens(variation, caller.context.allergens);
+        if (hits.length > 0) {
+          return `"${variation.title}" contains a declared allergen (${describeHits(hits)}). Every variation must avoid these entirely.`;
+        }
+      }
+
+      const duplicates = findPairwiseDuplicates(response.options.map((o) => o.title));
+      if (duplicates.length > 0) {
+        const [i, j] = duplicates[0];
+        return `"${response.options[i].title}" and "${response.options[j].title}" are too close to each other. Produce three genuinely different variations, not near-identical rewrites.`;
+      }
+
+      return null;
+    },
+  });
+
+  return { options: data.options, generationId };
+}
+
+// ---------------------------------------------------------------------------
+// Stage 5 — the full recipe card, for the chosen variation
+// ---------------------------------------------------------------------------
+
 export async function generateRecipe(
   caller: Caller,
   input: {
-    suggestion: Suggestion;
+    option: RefinedOption;
+    /** The stage-3 choices that shaped the chosen variation, carried through
+     *  so the recipe actually uses them rather than re-deciding. */
+    componentSelections?: Record<string, string> | null;
+    mainIngredient?: string | null;
+    needsUsingUp?: string | null;
     servings: number;
-    /** Free text from "refresh card" ("too much faff", "make the sauce sharper"). */
-    feedback?: string | null;
-    /** The card being revised, so the model can improve rather than restart. */
+    /** The card being revised at a new serving count, so the model can adjust rather than restart. */
     previous?: Recipe | null;
-    batchCooking?: boolean | null;
   },
 ) {
-  const { suggestion, servings } = input;
+  const { option, servings } = input;
 
   const parts = [
     `Write the full recipe for this dish:
 
-Title: ${suggestion.title}
-Cuisine: ${suggestion.cuisine}
-The pitch was: ${suggestion.pitch}
-Flavour layer: ${suggestion.flavour_layer ?? "your choice"}
-Roughly ${suggestion.total_minutes} minutes total.
+Title: ${option.title}
+Cuisine: ${option.cuisine}
+Description: ${option.description}
+Hero ingredients: ${option.hero_ingredients.join(", ")}
+Flavours: ${option.flavours.join(", ")}
+Roughly ${option.effort_minutes} minutes.
 
 Write it for ${servings} ${servings === 1 ? "person" : "people"} and set base_servings to ${servings}.`,
 
     `Every quantity mentioned in a step must be written as a placeholder referencing the ingredient's id — {ing_1}, {ing_2} and so on — never as a literal amount. The app substitutes the scaled amount when it renders, so "Toss {ing_1} with {ing_4} and leave for 15 minutes" is right and "Toss 400g chicken with 2 tbsp oil" is wrong. Every id you reference must exist in the ingredients list.
 
-Mark each ingredient's scales value honestly: most things scale linearly, but salt, spices, dried chilli, oil for frying and water for boiling do not — use sublinear or fixed for those.
-
-Set in_bank to false for anything the household does not already have.`,
+Mark each ingredient's scales value honestly: most things scale linearly, but salt, spices, dried chilli, oil for frying and water for boiling do not — use sublinear or fixed for those.`,
   ];
 
-  if (input.batchCooking) {
-    parts.push(BATCH_COOKING_INSTRUCTION);
-  }
-
-  if (input.previous) {
-    // Compact, not pretty-printed — the model doesn't need the indentation,
-    // and this can be the largest single block on the revise path. in_bank
-    // is stripped too: it's about to be recomputed regardless (below), so
-    // there's nothing useful for the model to preserve or reconsider there.
-    const previousForPrompt = {
-      ...input.previous,
-      ingredients: input.previous.ingredients.map(({ in_bank: _inBank, ...rest }) => rest),
-    };
-
+  if (input.componentSelections && Object.keys(input.componentSelections).length > 0) {
     parts.push(
-      `You are revising this recipe rather than starting again. Keep what works:\n\n${JSON.stringify(
-        previousForPrompt,
-      )}`,
+      `CHOSEN COMPONENTS — the household picked these while tailoring the dish; the recipe must actually use them:\n${Object.entries(
+        input.componentSelections,
+      )
+        .map(([slot, value]) => `- ${slot}: ${value}`)
+        .join("\n")}`,
     );
   }
 
-  if (input.feedback?.trim()) {
+  if (input.mainIngredient?.trim()) {
+    parts.push(`MAIN INGREDIENT: ${wrapUserText("main_ingredient", input.mainIngredient)}`);
+  }
+
+  if (input.needsUsingUp?.trim()) {
+    parts.push(`ANYTHING TO USE UP: ${wrapUserText("needs_using_up", input.needsUsingUp)}`);
+  }
+
+  if (input.previous) {
     parts.push(
-      `WHAT THEY WANT CHANGED:\n${wrapUserText("feedback", input.feedback)}`,
+      `You are revising this recipe at a new serving count rather than starting again. Keep what works:\n\n${JSON.stringify(
+        input.previous,
+      )}`,
     );
   }
 
@@ -303,18 +407,5 @@ Set in_bank to false for anything the household does not already have.`,
     },
   });
 
-  // Recomputed against the real bank rather than trusted outright — the same
-  // belt-and-suspenders move as the allergen guardrail: a model that can see
-  // the bank can still get one entry wrong. (Deferred: dropping in_bank from
-  // what Claude is asked to produce entirely, since this always overwrites
-  // it anyway, is an optional follow-up to test locally after deployment.)
-  const recipe: Recipe = {
-    ...data,
-    ingredients: data.ingredients.map((ingredient) => ({
-      ...ingredient,
-      in_bank: isInBank(ingredient.item, caller.context.ingredients),
-    })),
-  };
-
-  return { recipe, generationId };
+  return { recipe: data, generationId };
 }

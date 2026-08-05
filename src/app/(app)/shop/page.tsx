@@ -1,6 +1,5 @@
 import { requireHouseholdSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import type { IngredientCategory } from "@/lib/db/types";
 import { ensureActiveList } from "./actions";
 import { ShoppingList } from "./shopping-list";
 
@@ -9,7 +8,6 @@ export interface ShopListItem {
   item: string;
   amount: number | null;
   unit: string | null;
-  category: IngredientCategory | null;
   source_recipe_ids: string[];
   added_by: string;
   ticked: boolean;
@@ -27,11 +25,10 @@ export default async function ShopPage() {
   const listId = await ensureActiveList();
   const supabase = await createClient();
 
-  const [{ data: list }, { data: items }, { data: settings }, { data: recipes }] = await Promise.all([
-    supabase.from("shopping_lists").select("id, include_staples").eq("id", listId).single(),
+  const [{ data: items }, { data: settings }, { data: recipes }] = await Promise.all([
     supabase
       .from("list_items")
-      .select("id, item, amount, unit, category, source_recipe_ids, added_by, ticked, ticked_by, is_manual")
+      .select("id, item, amount, unit, source_recipe_ids, added_by, ticked, ticked_by, is_manual")
       .eq("list_id", listId)
       .order("created_at"),
     supabase
@@ -57,7 +54,6 @@ export default async function ShopPage() {
       <ShoppingList
         listId={listId}
         initialItems={(items ?? []) as ShopListItem[]}
-        initialIncludeStaples={list?.include_staples ?? false}
         settings={settings ?? { supermarket: null, delivery_day: null, shopping_notes: null }}
         recipeTitles={recipeTitles}
       />

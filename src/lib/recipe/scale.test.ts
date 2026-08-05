@@ -20,7 +20,6 @@ function ingredient(overrides: Partial<RecipeIngredient> = {}): RecipeIngredient
     component: "protein",
     scales: "linear",
     optional: false,
-    in_bank: true,
     ...overrides,
   };
 }

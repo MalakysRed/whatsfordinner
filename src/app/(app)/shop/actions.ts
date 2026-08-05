@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/server";
 import { scaleIngredients } from "@/lib/recipe/scale";
 import { canMerge, mergeAmounts, type MergeableLine } from "@/lib/shopping/merge";
 import type { Recipe } from "@/lib/schemas/recipe";
-import type { IngredientCategory } from "@/lib/db/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export interface ActionResult {
@@ -17,30 +16,23 @@ export interface ActionResult {
 
 interface ActiveList {
   id: string;
-  include_staples: boolean;
 }
 
 /** One active list per household (FR9.1) — created on first use, not eagerly. */
 async function activeList(supabase: SupabaseClient, householdId: string): Promise<ActiveList> {
   const { data: existing } = await supabase
     .from("shopping_lists")
-    .select("id, include_staples")
+    .select("id")
     .eq("household_id", householdId)
     .eq("status", "active")
     .maybeSingle();
 
   if (existing) return existing;
 
-  const { data: settings } = await supabase
-    .from("settings")
-    .select("default_include_staples")
-    .eq("household_id", householdId)
-    .single();
-
   const { data: created } = await supabase
     .from("shopping_lists")
-    .insert({ household_id: householdId, include_staples: settings?.default_include_staples ?? false })
-    .select("id, include_staples")
+    .insert({ household_id: householdId })
+    .select("id")
     .single();
 
   return created!;
@@ -69,14 +61,9 @@ async function foldIntoList(
   userId: string,
   recipeId: string,
   ingredients: { item: string; amount: number | null; unit: string | null }[],
-  bankByName: Map<string, { category: IngredientCategory; staple: boolean }>,
-  includeStaples: boolean,
   items: WorkingItem[],
 ): Promise<void> {
   for (const ingredient of ingredients) {
-    const bankEntry = bankByName.get(ingredient.item.trim().toLowerCase());
-    if (!includeStaples && bankEntry?.staple) continue;
-
     const candidate: MergeableLine = {
       item: ingredient.item,
       amount: ingredient.amount,
@@ -108,7 +95,6 @@ async function foldIntoList(
         item: ingredient.item,
         amount: ingredient.amount,
         unit: ingredient.unit,
-        category: bankEntry?.category ?? null,
         source_recipe_ids: [recipeId],
         added_by: userId,
         is_manual: false,
@@ -124,27 +110,19 @@ async function foldIntoList(
 
 async function loadWorkingState(
   supabase: SupabaseClient,
-  householdId: string,
   listId: string,
-): Promise<{ bankByName: Map<string, { category: IngredientCategory; staple: boolean }>; items: WorkingItem[] }> {
-  const [{ data: bank }, { data: existingItems }] = await Promise.all([
-    supabase.from("ingredients").select("name, category, staple").eq("household_id", householdId),
-    supabase.from("list_items").select("id, item, amount, unit, source_recipe_ids").eq("list_id", listId),
-  ]);
-
-  const bankByName = new Map(
-    (bank ?? []).map((i) => [
-      (i.name as string).trim().toLowerCase(),
-      { category: i.category as IngredientCategory, staple: i.staple as boolean },
-    ]),
-  );
+): Promise<{ items: WorkingItem[] }> {
+  const { data: existingItems } = await supabase
+    .from("list_items")
+    .select("id, item, amount, unit, source_recipe_ids")
+    .eq("list_id", listId);
 
   const items: WorkingItem[] = (existingItems ?? []).map((row) => ({
     ...row,
     source_recipe_ids: row.source_recipe_ids ?? [],
   }));
 
-  return { bankByName, items };
+  return { items };
 }
 
 /** Add a recipe at a chosen serving count (FR9.2). */
@@ -165,9 +143,9 @@ export async function addRecipeToList(recipeId: string, servings: number): Promi
   const scaled = scaleIngredients(recipe.ingredients, recipe.base_servings, servings);
 
   const list = await activeList(supabase, session.householdId);
-  const { bankByName, items } = await loadWorkingState(supabase, session.householdId, list.id);
+  const { items } = await loadWorkingState(supabase, list.id);
 
-  await foldIntoList(supabase, list.id, session.userId, recipeId, scaled, bankByName, list.include_staples, items);
+  await foldIntoList(supabase, list.id, session.userId, recipeId, scaled, items);
 
   revalidatePath("/shop");
   return { ok: true };
@@ -187,20 +165,11 @@ export async function addRecipesToList(recipeIds: string[]): Promise<ActionResul
   if (!recipeRows || recipeRows.length === 0) return { ok: false, error: "Recipes not found." };
 
   const list = await activeList(supabase, session.householdId);
-  const { bankByName, items } = await loadWorkingState(supabase, session.householdId, list.id);
+  const { items } = await loadWorkingState(supabase, list.id);
 
   for (const row of recipeRows) {
     const recipe = row.payload as Recipe;
-    await foldIntoList(
-      supabase,
-      list.id,
-      session.userId,
-      row.id,
-      recipe.ingredients,
-      bankByName,
-      list.include_staples,
-      items,
-    );
+    await foldIntoList(supabase, list.id, session.userId, row.id, recipe.ingredients, items);
   }
 
   revalidatePath("/shop");
@@ -231,7 +200,6 @@ export async function addManualItem(
     item: parsed.data.item.trim(),
     amount: parsed.data.amount,
     unit: parsed.data.unit,
-    category: null,
     source_recipe_ids: [],
     added_by: session.userId,
     is_manual: true,
@@ -306,21 +274,6 @@ export async function removeRecipeFromList(recipeId: string): Promise<ActionResu
       await supabase.from("list_items").update({ source_recipe_ids: remaining }).eq("id", row.id);
     }
   }
-
-  revalidatePath("/shop");
-  return { ok: true };
-}
-
-export async function setIncludeStaples(listId: string, includeStaples: boolean): Promise<ActionResult> {
-  await requireHouseholdSession();
-  const supabase = await createClient();
-
-  const { error } = await supabase
-    .from("shopping_lists")
-    .update({ include_staples: includeStaples })
-    .eq("id", listId);
-
-  if (error) return { ok: false, error: "Could not save that." };
 
   revalidatePath("/shop");
   return { ok: true };

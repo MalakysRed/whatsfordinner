@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { Button, Card, EmptyState, Input, Pill } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
-import { CATEGORY_LABELS } from "@/lib/db/types";
 import { roundForDisplay } from "@/lib/recipe/scale";
 import { buildCoworkExport, downloadCoworkExport, type CoworkSettings } from "@/lib/shopping/cowork";
 import {
@@ -12,7 +11,6 @@ import {
   archiveActiveList,
   clearActiveList,
   removeListItem,
-  setIncludeStaples,
   toggleItemTicked,
 } from "./actions";
 import type { ShopListItem } from "./page";
@@ -26,18 +24,15 @@ import type { ShopListItem } from "./page";
 export function ShoppingList({
   listId,
   initialItems,
-  initialIncludeStaples,
   settings,
   recipeTitles,
 }: {
   listId: string;
   initialItems: ShopListItem[];
-  initialIncludeStaples: boolean;
   settings: CoworkSettings;
   recipeTitles: Record<string, string>;
 }) {
   const [items, setItems] = useState(initialItems);
-  const [includeStaples, setIncludeStaplesState] = useState(initialIncludeStaples);
   const [manualItem, setManualItem] = useState("");
   const [manualAmount, setManualAmount] = useState("");
   const [manualUnit, setManualUnit] = useState("");
@@ -77,15 +72,6 @@ export function ShoppingList({
     };
   }, [listId]);
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, ShopListItem[]>();
-    for (const item of items) {
-      const key = item.category ? CATEGORY_LABELS[item.category] : "Other";
-      map.set(key, [...(map.get(key) ?? []), item]);
-    }
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [items]);
-
   async function onToggle(item: ShopListItem) {
     // Optimistic — realtime will confirm, but waiting for the round trip
     // before the tick shows makes a phone in a shop feel broken.
@@ -109,12 +95,6 @@ export function ShoppingList({
     setManualUnit("");
   }
 
-  async function onToggleStaples() {
-    const next = !includeStaples;
-    setIncludeStaplesState(next);
-    await setIncludeStaples(listId, next);
-  }
-
   async function onArchive() {
     setArchiving(true);
     try {
@@ -136,7 +116,7 @@ export function ShoppingList({
 
   function onExport() {
     const text = buildCoworkExport(
-      items.map((i) => ({ item: i.item, amount: i.amount, unit: i.unit, category: i.category })),
+      items.map((i) => ({ item: i.item, amount: i.amount, unit: i.unit })),
       settings,
       Array.from(new Set(items.flatMap((i) => i.source_recipe_ids.map((id) => recipeTitles[id]).filter(Boolean)))),
     );
@@ -145,7 +125,7 @@ export function ShoppingList({
 
   async function onCopy() {
     const text = buildCoworkExport(
-      items.map((i) => ({ item: i.item, amount: i.amount, unit: i.unit, category: i.category })),
+      items.map((i) => ({ item: i.item, amount: i.amount, unit: i.unit })),
       settings,
       Array.from(new Set(items.flatMap((i) => i.source_recipe_ids.map((id) => recipeTitles[id]).filter(Boolean)))),
     );
@@ -154,26 +134,15 @@ export function ShoppingList({
 
   return (
     <div className="space-y-4 pb-8">
-      <Card className="flex items-center justify-between gap-3 p-4">
-        <label className="flex items-center gap-2 text-sm font-medium">
-          <input
-            type="checkbox"
-            checked={includeStaples}
-            onChange={() => void onToggleStaples()}
-            className="size-5 accent-[var(--accent)]"
-          />
-          Include staples
-        </label>
-        <div className="flex gap-2">
-          {items.length > 0 && (
-            <Button type="button" variant="secondary" onClick={() => void onClear()} disabled={clearing}>
-              {clearing ? "Clearing…" : "Empty list"}
-            </Button>
-          )}
-          <Button type="button" variant="secondary" onClick={() => void onArchive()} disabled={archiving}>
-            {archiving ? "Archiving…" : "Done shopping"}
+      <Card className="flex items-center justify-end gap-2 p-4">
+        {items.length > 0 && (
+          <Button type="button" variant="secondary" onClick={() => void onClear()} disabled={clearing}>
+            {clearing ? "Clearing…" : "Empty list"}
           </Button>
-        </div>
+        )}
+        <Button type="button" variant="secondary" onClick={() => void onArchive()} disabled={archiving}>
+          {archiving ? "Archiving…" : "Done shopping"}
+        </Button>
       </Card>
 
       {items.length === 0 ? (
@@ -181,48 +150,41 @@ export function ShoppingList({
           Add a recipe from the book, or add something manually below.
         </EmptyState>
       ) : (
-        <div className="space-y-4">
-          {grouped.map(([category, categoryItems]) => (
-            <div key={category} className="space-y-2">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">{category}</h2>
-              <Card className="divide-y divide-line">
-                {categoryItems.map((item) => {
-                  const sources = item.source_recipe_ids.map((id) => recipeTitles[id]).filter(Boolean);
-                  return (
-                    <div key={item.id} className="flex items-start gap-3 px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={item.ticked}
-                        onChange={() => void onToggle(item)}
-                        aria-label={`Tick ${item.item}`}
-                        className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className={`text-base ${item.ticked ? "text-muted line-through" : ""}`}>
-                          {item.item}
-                          {item.amount !== null && (
-                            <span className="text-muted"> · {roundForDisplay(item.amount, item.unit)}</span>
-                          )}
-                        </p>
-                        {sources.length > 0 && (
-                          <p className="text-xs text-muted">From {sources.join(", ")}</p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void onRemove(item.id)}
-                        aria-label={`Remove ${item.item}`}
-                        className="shrink-0 text-sm text-muted underline"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  );
-                })}
-              </Card>
-            </div>
-          ))}
-        </div>
+        <Card className="divide-y divide-line">
+          {items.map((item) => {
+            const sources = item.source_recipe_ids.map((id) => recipeTitles[id]).filter(Boolean);
+            return (
+              <div key={item.id} className="flex items-start gap-3 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={item.ticked}
+                  onChange={() => void onToggle(item)}
+                  aria-label={`Tick ${item.item}`}
+                  className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className={`text-base ${item.ticked ? "text-muted line-through" : ""}`}>
+                    {item.item}
+                    {item.amount !== null && (
+                      <span className="text-muted"> · {roundForDisplay(item.amount, item.unit)}</span>
+                    )}
+                  </p>
+                  {sources.length > 0 && (
+                    <p className="text-xs text-muted">From {sources.join(", ")}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void onRemove(item.id)}
+                  aria-label={`Remove ${item.item}`}
+                  className="shrink-0 text-sm text-muted underline"
+                >
+                  Remove
+                </button>
+              </div>
+            );
+          })}
+        </Card>
       )}
 
       <Card className="space-y-3 p-4">

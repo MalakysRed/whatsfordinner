@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkDishComponentsForAllergens,
+  checkOptionForAllergens,
   checkRecipeForAllergens,
-  checkSuggestionForAllergens,
+  checkRefinedOptionForAllergens,
   expandAllergenTerms,
 } from "./allergen";
 import type { Recipe } from "@/lib/schemas/recipe";
-import type { Suggestion } from "@/lib/schemas/suggestion";
+import type { Option } from "@/lib/schemas/option";
+import type { DishComponentsResponse } from "@/lib/schemas/dish-components";
+import type { RefinedOption } from "@/lib/schemas/dish-variations";
 
 function recipe(overrides: Partial<Recipe> = {}): Recipe {
   return {
@@ -28,7 +32,6 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
         component: "protein",
         scales: "linear",
         optional: false,
-        in_bank: true,
       },
     ],
     steps: [
@@ -46,23 +49,51 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
   };
 }
 
-function suggestion(overrides: Partial<Suggestion> = {}): Suggestion {
+function option(overrides: Partial<Option> = {}): Option {
   return {
-    id: "s1",
-    meal_type: "dinner",
+    id: "o1",
     title: "Charred greens with tahini",
-    pitch: "Quick, sharp, and mostly from the cupboard.",
+    description: "Quick, sharp, and mostly from the cupboard.",
     cuisine: "Middle Eastern",
-    components: {
+    effort_minutes: 25,
+    axes: {
       protein: "chickpeas",
-      fat: "olive oil",
-      carb: "flatbread",
-      veg: ["tenderstem broccoli"],
+      method: "griddle",
+      cuisine: "Middle Eastern",
+      richness: "light",
     },
-    flavour_layer: "tahini and lemon",
-    total_minutes: 25,
-    difficulty: "easy",
-    ingredients_not_in_bank: [],
+    uses_named_ingredients: [],
+    ...overrides,
+  };
+}
+
+function dishComponents(
+  overrides: Partial<DishComponentsResponse> = {},
+): DishComponentsResponse {
+  return {
+    slots: [
+      {
+        slot: "vegetable",
+        label: "Vegetables",
+        options: [
+          { name: "Tenderstem broccoli", note: "Holds up to a hot griddle." },
+          { name: "Charred courgette", note: null },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function refinedOption(overrides: Partial<RefinedOption> = {}): RefinedOption {
+  return {
+    id: "r1",
+    title: "Charred greens with tahini and pickled chilli",
+    description: "Sharp, smoky, mostly from the cupboard.",
+    hero_ingredients: ["chickpeas", "tenderstem broccoli", "tahini"],
+    flavours: ["smoky", "sharp"],
+    cuisine: "Middle Eastern",
+    effort_minutes: 25,
     uses_named_ingredients: [],
     ...overrides,
   };
@@ -109,7 +140,6 @@ describe("checkRecipeForAllergens", () => {
             component: "fat",
             scales: "sublinear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -161,7 +191,6 @@ describe("checkRecipeForAllergens", () => {
             component: "protein",
             scales: "linear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -194,7 +223,6 @@ describe("checkRecipeForAllergens", () => {
             component: "veg",
             scales: "linear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -217,7 +245,6 @@ describe("checkRecipeForAllergens", () => {
             component: "veg",
             scales: "linear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -240,7 +267,6 @@ describe("checkRecipeForAllergens", () => {
             component: "flavour_layer",
             scales: "sublinear",
             optional: false,
-            in_bank: true,
           },
         ],
       }),
@@ -260,31 +286,93 @@ describe("checkRecipeForAllergens", () => {
   });
 });
 
-describe("checkSuggestionForAllergens", () => {
+describe("checkOptionForAllergens", () => {
   // Catching it here saves generating a card that would be thrown away.
-  it("catches an allergen in a suggestion's components", () => {
-    const hits = checkSuggestionForAllergens(
-      suggestion({
-        components: {
-          protein: "king prawns",
-          fat: "olive oil",
-          carb: "rice",
-          veg: ["pak choi"],
-        },
+  it("catches an allergen in the protein axis", () => {
+    const hits = checkOptionForAllergens(
+      option({
+        axes: { protein: "king prawns", method: "stir fry", cuisine: "Cantonese", richness: "light" },
       }),
       ["shellfish"],
     );
 
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits[0].location).toBe("components.protein");
   });
 
-  it("catches an allergen in the flavour layer", () => {
-    const hits = checkSuggestionForAllergens(suggestion(), ["sesame"]);
-    expect(hits.map((h) => h.location)).toContain("flavour_layer");
+  it("catches an allergen in uses_named_ingredients", () => {
+    const hits = checkOptionForAllergens(
+      option({ uses_named_ingredients: ["peanut butter"] }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("uses_named_ingredients[0]");
   });
 
-  it("passes a clean suggestion", () => {
-    expect(checkSuggestionForAllergens(suggestion(), ["peanuts"])).toEqual([]);
+  it("passes a clean option", () => {
+    expect(checkOptionForAllergens(option(), ["peanuts"])).toEqual([]);
+  });
+});
+
+describe("checkDishComponentsForAllergens", () => {
+  it("catches an allergen in a slot option's name", () => {
+    const hits = checkDishComponentsForAllergens(
+      dishComponents({
+        slots: [
+          {
+            slot: "sauce",
+            label: "Sauce",
+            options: [{ name: "Peanut satay sauce", note: null }],
+          },
+        ],
+      }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("slots[0].options[0].name");
+  });
+
+  it("catches an allergen hidden in a pairing note", () => {
+    const hits = checkDishComponentsForAllergens(
+      dishComponents({
+        slots: [
+          {
+            slot: "sauce",
+            label: "Sauce",
+            options: [{ name: "Green sauce", note: "Finished with shaved parmesan." }],
+          },
+        ],
+      }),
+      ["dairy"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("slots[0].options[0].note");
+  });
+
+  it("passes clean components", () => {
+    expect(checkDishComponentsForAllergens(dishComponents(), ["peanuts"])).toEqual([]);
+  });
+});
+
+describe("checkRefinedOptionForAllergens", () => {
+  it("catches an allergen in hero_ingredients", () => {
+    const hits = checkRefinedOptionForAllergens(
+      refinedOption({ hero_ingredients: ["king prawns", "rice"] }),
+      ["shellfish"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("hero_ingredients[0]");
+  });
+
+  it("catches an allergen in flavours", () => {
+    const hits = checkRefinedOptionForAllergens(
+      refinedOption({ flavours: ["peanut", "sharp"] }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("flavours[0]");
+  });
+
+  it("passes a clean refined option", () => {
+    expect(checkRefinedOptionForAllergens(refinedOption(), ["peanuts"])).toEqual([]);
   });
 });

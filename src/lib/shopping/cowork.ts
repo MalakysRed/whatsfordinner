@@ -1,5 +1,3 @@
-import { CATEGORY_LABELS } from "@/lib/db/types";
-import type { IngredientCategory } from "@/lib/db/types";
 import { roundForDisplay } from "@/lib/recipe/scale";
 
 /**
@@ -7,13 +5,16 @@ import { roundForDisplay } from "@/lib/recipe/scale";
  * block a household member pastes into Cowork to place the actual order.
  * Explicitly tells Cowork not to complete checkout: whoever runs the prompt
  * should be the one pressing buy, not the model.
+ *
+ * A flat alphabetised list rather than grouped by category (decision D1 has
+ * been superseded: the ingredient bank that supplied `category` is gone, and
+ * this phase does not reintroduce a grouping source purely for the export).
  */
 
 export interface CoworkItem {
   item: string;
   amount: number | null;
   unit: string | null;
-  category: IngredientCategory | null;
 }
 
 export interface CoworkSettings {
@@ -42,23 +43,13 @@ export function buildCoworkExport(
     lines.push(`Preferences: ${settings.shopping_notes}`, "");
   }
 
-  const byCategory = new Map<string, CoworkItem[]>();
-  for (const item of items) {
-    const key = item.category ? CATEGORY_LABELS[item.category] : "Other";
-    byCategory.set(key, [...(byCategory.get(key) ?? []), item]);
-  }
-
-  for (const category of Array.from(byCategory.keys()).sort((a, b) => a.localeCompare(b))) {
-    lines.push(category.toUpperCase());
-    for (const item of byCategory.get(category)!) {
-      const quantity = item.amount === null ? "" : `, ${roundForDisplay(item.amount, item.unit)}`;
-      lines.push(`- ${item.item}${quantity}`);
-    }
-    lines.push("");
+  for (const item of [...items].sort((a, b) => a.item.localeCompare(b.item))) {
+    const quantity = item.amount === null ? "" : `, ${roundForDisplay(item.amount, item.unit)}`;
+    lines.push(`- ${item.item}${quantity}`);
   }
 
   if (recipeTitles.length > 0) {
-    lines.push(`These are for: ${recipeTitles.join(", ")}`);
+    lines.push("", `These are for: ${recipeTitles.join(", ")}`);
   }
 
   return lines.join("\n").trim();
