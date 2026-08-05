@@ -448,7 +448,7 @@ export function OptionFlow({
               onClick={() => retry(() => void getRecipe())}
               className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
             >
-              Generate recipe
+              Make it dinner
             </button>
           </Card>
         )}
@@ -525,7 +525,7 @@ export function OptionFlow({
           onClick={() => retry(() => void generateVariations())}
           className="min-h-12 w-full rounded-xl bg-accent px-4 py-3 text-base font-medium text-on-accent"
         >
-          Continue
+          Show me 3 ways to cook this
         </button>
       </div>
     );
@@ -533,11 +533,16 @@ export function OptionFlow({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold tracking-tight">
+          {input.mainIngredient?.trim()
+            ? `Choose the flavour direction for your ${input.mainIngredient.trim()} dinner`
+            : "Choose the flavour direction for your dinner"}
+        </h2>
         <button
           type="button"
           onClick={() => retry(() => void generateOptions(true))}
-          className="min-h-9 rounded-full border border-line px-3 py-1.5 text-sm font-medium"
+          className="min-h-9 shrink-0 rounded-full border border-line px-3 py-1.5 text-sm font-medium"
         >
           Refresh
         </button>
@@ -616,9 +621,23 @@ function VariationCard({
   onSelect: () => void;
 }) {
   return (
-    <Card className={`overflow-hidden ${selected ? "border-accent" : ""}`}>
+    <Card
+      className={`overflow-hidden ${
+        selected ? "border-accent bg-accent/10 ring-2 ring-accent" : ""
+      }`}
+    >
       <button type="button" onClick={onSelect} className="w-full space-y-2 p-5 text-left">
-        <h3 className="text-lg font-semibold leading-tight">{variation.title}</h3>
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-lg font-semibold leading-tight">{variation.title}</h3>
+          <span
+            aria-hidden
+            className={`flex size-6 shrink-0 items-center justify-center rounded-full border text-sm ${
+              selected ? "border-accent bg-accent text-on-accent" : "border-line"
+            }`}
+          >
+            {selected ? "✓" : ""}
+          </span>
+        </div>
         <p className="text-base leading-relaxed text-muted">{variation.description}</p>
         <p className="text-sm text-muted">
           {variation.cuisine} · {formatMinutes(variation.effort_minutes)}
@@ -630,6 +649,9 @@ function VariationCard({
         {variation.uses_named_ingredients.length > 0 && (
           <p className="text-sm text-accent">Uses: {variation.uses_named_ingredients.join(", ")}</p>
         )}
+        <span className="block text-sm font-medium text-accent">
+          {selected ? "Selected" : "Tap to pick this one"}
+        </span>
       </button>
     </Card>
   );

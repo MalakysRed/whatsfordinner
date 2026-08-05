@@ -48,6 +48,22 @@ const EFFORT_BAND_TEXT: Record<EffortBand, string> = {
   project: "an evening, actively enjoyable",
 };
 
+/**
+ * Whether a pinned main ingredient shows up in a direction's hero_ingredients
+ * — a household that typed "chicken thighs" should still match a hero
+ * ingredient of "chicken", so this checks either string containing the other
+ * rather than requiring an exact match.
+ */
+function mentionsIngredient(heroIngredients: string[], mainIngredient: string): boolean {
+  const needle = mainIngredient.trim().toLowerCase();
+  if (!needle) return true;
+
+  return heroIngredients.some((hero) => {
+    const hay = hero.trim().toLowerCase();
+    return hay.includes(needle) || needle.includes(hay);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Stage 2 — six lightweight options
 // ---------------------------------------------------------------------------
@@ -77,7 +93,7 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
       `MAIN INGREDIENT — a hard constraint, not a suggestion:\n${wrapUserText(
         "main_ingredient",
         input.mainIngredient,
-      )}\n\nEvery one of the eight directions must be built around this. Vary the cooking method, cuisine and richness instead — eight ways to take the same ingredient, not eight unrelated dishes.`,
+      )}\n\nEvery one of the eight directions must be built around this. Vary the cooking method, cuisine and richness instead — eight ways to take the same ingredient, not eight unrelated dishes. Every direction's hero_ingredients must include it by name, so the household can see it was actually used, not just implied.`,
     );
   }
 
@@ -147,6 +163,17 @@ export async function generateOptionSummaries(caller: Caller, input: OptionsInpu
         const hits = checkOptionForAllergens(option, caller.context.allergens);
         if (hits.length > 0) {
           return `"${option.direction}" contains a declared allergen (${describeHits(hits)}). Every option must avoid these entirely.`;
+        }
+      }
+
+      if (input.mainIngredient?.trim()) {
+        const missing = response.options.filter(
+          (option) => !mentionsIngredient(option.hero_ingredients, input.mainIngredient!),
+        );
+        if (missing.length > 0) {
+          return `these directions do not name the main ingredient in hero_ingredients: ${missing
+            .map((o) => `"${o.direction}"`)
+            .join(", ")}. Every direction must include it by name so the household can see it was honoured.`;
         }
       }
 
