@@ -86,7 +86,7 @@ export function HomeClient({
         className="flex min-h-24 w-full flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4 text-left"
       >
         <span className="text-lg font-medium">Craft a recipe</span>
-        <span className="mt-0.5 text-sm text-muted">Quick, standard, or a project</span>
+        <span className="mt-0.5 text-sm text-muted">Guided recipe design</span>
       </button>
     </div>
   );
