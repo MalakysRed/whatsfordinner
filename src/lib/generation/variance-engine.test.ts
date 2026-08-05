@@ -181,16 +181,36 @@ describe("findAxesCollisions", () => {
     expect(findAxesCollisions([axes(), axes({ cuisine: "Italian" })])).toEqual([]);
   });
 
-  it("with ignoreProtein, does not flag options that share a protein but differ on method or cuisine", () => {
-    // A pinned main ingredient means every option shares a protein by design —
-    // the collision check must not trip on the field the user chose.
+  it("with ignoreAxes: [protein], does not flag options that share a protein but differ on method or cuisine", () => {
+    // A pinned hero ingredient means every option shares a protein by design —
+    // the collision check must not trip on the axis the user chose.
     const shared = [axes({ method: "roast" }), axes({ method: "braise" })];
-    expect(findAxesCollisions(shared, { ignoreProtein: true })).toEqual([]);
+    expect(findAxesCollisions(shared, { ignoreAxes: ["protein"] })).toEqual([]);
   });
 
-  it("with ignoreProtein, still flags options identical on method and cuisine alone", () => {
+  it("with ignoreAxes: [protein], still flags options identical on method and cuisine alone", () => {
     const identical = [axes({ protein: "chicken" }), axes({ protein: "tofu" })];
-    expect(findAxesCollisions(identical, { ignoreProtein: true })).toEqual([[0, 1]]);
+    expect(findAxesCollisions(identical, { ignoreAxes: ["protein"] })).toEqual([[0, 1]]);
+  });
+
+  it("with two ignored axes, only flags a collision on the one axis still checked", () => {
+    // Two category picks (e.g. hero + format) means protein and method are both
+    // pinned by design — only a cuisine match should still count as a collision.
+    const sameCuisineOnly = [
+      axes({ protein: "chicken", method: "roast", cuisine: "British" }),
+      axes({ protein: "chicken", method: "roast", cuisine: "British" }),
+    ];
+    expect(
+      findAxesCollisions(sameCuisineOnly, { ignoreAxes: ["protein", "method"] }),
+    ).toEqual([[0, 1]]);
+
+    const differentCuisine = [
+      axes({ protein: "chicken", method: "roast", cuisine: "British" }),
+      axes({ protein: "chicken", method: "roast", cuisine: "Italian" }),
+    ];
+    expect(
+      findAxesCollisions(differentCuisine, { ignoreAxes: ["protein", "method"] }),
+    ).toEqual([]);
   });
 });
 

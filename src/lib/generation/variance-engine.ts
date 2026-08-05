@@ -131,21 +131,24 @@ function drawOne(
  * instructed to vary richness, which is harder to check mechanically and is
  * left to the prompt.
  *
- * `ignoreProtein` drops protein from the comparison — used when a main
- * ingredient has been pinned, since all eight options share it by design and
- * the collision check would otherwise trip on the very field the user chose.
+ * `ignoreAxes` drops one or more axes from the comparison — used when the
+ * household has pinned a category at stage 1 (cuisine/format/hero, mapped to
+ * cuisine/method/protein respectively), since all eight options share that
+ * axis by design and the collision check would otherwise trip on the very
+ * field the household chose.
  */
 export function findAxesCollisions(
   optionAxes: OptionAxes[],
-  { ignoreProtein = false }: { ignoreProtein?: boolean } = {},
+  { ignoreAxes = [] }: { ignoreAxes?: ("protein" | "method" | "cuisine")[] } = {},
 ): number[][] {
+  const ignore = new Set(ignoreAxes);
   const seen = new Map<string, number[]>();
 
   optionAxes.forEach((axes, index) => {
     const key = [
-      ignoreProtein ? null : normaliseToken(axes.protein),
-      normaliseToken(axes.method),
-      normaliseToken(axes.cuisine),
+      ignore.has("protein") ? null : normaliseToken(axes.protein),
+      ignore.has("method") ? null : normaliseToken(axes.method),
+      ignore.has("cuisine") ? null : normaliseToken(axes.cuisine),
     ]
       .filter((part): part is string => part !== null)
       .join("|");

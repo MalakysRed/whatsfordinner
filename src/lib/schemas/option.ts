@@ -42,6 +42,13 @@ export const optionSchema = z.object({
    * rather than trusting it happened silently inside the prompt.
    */
   uses_named_ingredients: z.array(z.string()),
+  /** A very brief, 14-word-max line of prose — enough context to tell the
+   *  eight directions apart at a glance, not a recipe summary. */
+  description: z.string().max(120),
+  /** One comparative sentence: how this direction differs from the other
+   *  seven in the same batch. Always present — there are always others to
+   *  compare against at stage 2. */
+  distinguishing_note: z.string().max(160),
 });
 
 export const optionsResponseSchema = z.object({

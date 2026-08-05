@@ -4,12 +4,18 @@ import { generateDishVariations } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
 import { optionSchema } from "@/lib/schemas/option";
 
-/** Stage 4 — three richer variations of the picked dish, informed by the stage-3 tailoring choices. */
+const categoryPickSchema = z.object({
+  axis: z.enum(["cuisine", "format", "hero"]),
+  value: z.string().max(80),
+});
+
+/** Stage 4 — up to three richer variations of the picked dish, informed by the stage-3 tailoring choices. */
 const bodySchema = z.object({
   option: optionSchema,
   component_selections: z.record(z.string(), z.string()).nullish(),
-  main_ingredient: z.string().max(80).nullish(),
+  category_picks: z.array(categoryPickSchema).max(2).nullish(),
   needs_using_up: z.string().max(500).nullish(),
+  batch_cooking: z.boolean().nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -27,8 +33,9 @@ export async function POST(request: NextRequest) {
     const result = await generateDishVariations(caller, {
       option: parsed.data.option,
       componentSelections: parsed.data.component_selections,
-      mainIngredient: parsed.data.main_ingredient,
+      categoryPicks: parsed.data.category_picks,
       needsUsingUp: parsed.data.needs_using_up,
+      batchCooking: parsed.data.batch_cooking,
     });
 
     return NextResponse.json({

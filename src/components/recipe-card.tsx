@@ -361,7 +361,7 @@ export function RecipeCard({
         </section>
       )}
 
-      {(recipe.make_ahead || recipe.leftovers) && (
+      {(recipe.make_ahead || recipe.leftovers || recipe.freezing_notes) && (
         <section className="space-y-2">
           {recipe.make_ahead && (
             <p className="text-base leading-relaxed">
@@ -373,6 +373,12 @@ export function RecipeCard({
             <p className="text-base leading-relaxed">
               <span className="font-medium">Leftovers: </span>
               {recipe.leftovers}
+            </p>
+          )}
+          {recipe.freezing_notes && (
+            <p className="text-base leading-relaxed">
+              <span className="font-medium">Freezing: </span>
+              {recipe.freezing_notes}
             </p>
           )}
         </section>

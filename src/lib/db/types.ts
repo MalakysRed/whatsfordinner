@@ -37,9 +37,6 @@ export type SeedAxis = "cuisine" | "format" | "hero";
 export type SeedStatus = "active" | "candidate" | "retired";
 export type SeedSource = "curated" | "harvested" | "proposed";
 
-export type ExclusionAxis = "protein" | "method" | "cuisine" | "dish";
-export type ExclusionReaction = "excluded" | "preferred";
-
 export interface UserRow {
   id: string;
   email: string;
@@ -109,15 +106,6 @@ export interface SeedPoolRow {
   tags: string[];
   status: SeedStatus;
   source: SeedSource;
-  created_at: string;
-}
-
-export interface PreferenceExclusionRow {
-  id: string;
-  household_id: string;
-  axis: ExclusionAxis;
-  value: string;
-  reaction: ExclusionReaction;
   created_at: string;
 }
 

@@ -11,13 +11,19 @@ import { refinedOptionSchema } from "@/lib/schemas/dish-variations";
  * dish — the "no free-text mutation once committed" rule is about changing
  * what the dish *is*, not about servings, which is always adjustable.
  */
+const categoryPickSchema = z.object({
+  axis: z.enum(["cuisine", "format", "hero"]),
+  value: z.string().max(80),
+});
+
 const bodySchema = z.object({
   option: refinedOptionSchema,
   previous: recipeSchema,
   servings: z.number().int().min(1).max(12),
   component_selections: z.record(z.string(), z.string()).nullish(),
-  main_ingredient: z.string().max(80).nullish(),
+  category_picks: z.array(categoryPickSchema).max(2).nullish(),
   needs_using_up: z.string().max(500).nullish(),
+  batch_cooking: z.boolean().nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -37,8 +43,9 @@ export async function POST(request: NextRequest) {
       servings: parsed.data.servings,
       previous: parsed.data.previous,
       componentSelections: parsed.data.component_selections,
-      mainIngredient: parsed.data.main_ingredient,
+      categoryPicks: parsed.data.category_picks,
       needsUsingUp: parsed.data.needs_using_up,
+      batchCooking: parsed.data.batch_cooking,
     });
 
     return NextResponse.json({

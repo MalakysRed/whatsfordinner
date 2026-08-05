@@ -22,7 +22,7 @@ import {
   describeHits,
 } from "./guardrails/allergen";
 import { runGeneration } from "./client";
-import { wrapUserText } from "./prompts/system";
+import { BATCH_COOKING_INSTRUCTION, wrapUserText } from "./prompts/system";
 import type { HouseholdContext } from "./prompts/context";
 import {
   findAxesCollisions,
@@ -30,7 +30,7 @@ import {
   type DrawnSeed,
   type EffortBand,
 } from "@/lib/generation/variance-engine";
-import type { MealType } from "@/lib/db/types";
+import type { MealType, SeedAxis } from "@/lib/db/types";
 
 interface Caller {
   householdId: string;
@@ -39,9 +39,16 @@ interface Caller {
   context: HouseholdContext;
 }
 
+/** A stage-1 category pick — a hard constraint on every downstream call,
+ *  generalizing what the single "main ingredient" field used to do to any
+ *  of the seed pool's three axes. 0-2 per generation (enforced client-side). */
+export interface CategoryPick {
+  axis: SeedAxis;
+  value: string;
+}
+
 /** Also the seed-set size drawn per call — see drawSeedSet in variance-engine.ts. */
 export const OPTION_COUNT = 8;
-const VARIATION_COUNT = 3;
 
 const EFFORT_BAND_TEXT: Record<EffortBand, string> = {
   quick: "around 20 minutes, minimal washing up",
@@ -49,14 +56,67 @@ const EFFORT_BAND_TEXT: Record<EffortBand, string> = {
   project: "an evening, actively enjoyable",
 };
 
+const AXIS_LABEL: Record<SeedAxis, string> = {
+  cuisine: "CUISINE",
+  format: "FORMAT / COOKING METHOD",
+  hero: "HERO INGREDIENT",
+};
+
+/** Which findAxesCollisions field a pinned seed axis corresponds to — a
+ *  hero pin fixes protein, a format pin fixes method, a cuisine pin fixes
+ *  itself. Same "good enough" mapping the old mainIngredient→ignoreProtein
+ *  shortcut already relied on. */
+const AXIS_TO_COLLISION_FIELD: Record<SeedAxis, "protein" | "method" | "cuisine"> = {
+  hero: "protein",
+  format: "method",
+  cuisine: "cuisine",
+};
+
+const AXIS_VARY_TEXT: Record<SeedAxis, string> = {
+  cuisine:
+    "Vary the protein, cooking method and richness instead — eight ways to explore the same cuisine, not eight unrelated dishes.",
+  format:
+    "Vary the protein, cuisine and richness instead — eight ways to use the same format, not eight unrelated dishes.",
+  hero: "Vary the cooking method, cuisine and richness instead — eight ways to take the same ingredient, not eight unrelated dishes. Every direction's hero_ingredients must include it by name, so the household can see it was actually used, not just implied.",
+};
+
+/** The heavier, stage-2 "hard constraint on all eight directions" framing. */
+function buildPinnedBlockForOptions(pick: CategoryPick): string {
+  return `${AXIS_LABEL[pick.axis]} — a hard constraint, not a suggestion:\n${wrapUserText(
+    `pinned_${pick.axis}`,
+    pick.value,
+  )}\n\nEvery one of the eight directions must be built around this. ${AXIS_VARY_TEXT[pick.axis]}`;
+}
+
+const AXIS_PIN_TEXT_SINGLE: Record<SeedAxis, string> = {
+  cuisine: "This dish must be built around this cuisine.",
+  format: "This dish must be built around this format or cooking method.",
+  hero: "This dish must be built around this ingredient — it must appear by name.",
+};
+
+/** The lighter framing used once a single dish has already been chosen
+ *  (stages 3-5) — reinforcement, since the chosen Option already encodes
+ *  the pin, not the primary mechanism for applying it. */
+function buildPinnedBlockSingle(pick: CategoryPick): string {
+  return `${AXIS_LABEL[pick.axis]} — a hard constraint, not a suggestion:\n${wrapUserText(
+    `pinned_${pick.axis}`,
+    pick.value,
+  )}\n\n${AXIS_PIN_TEXT_SINGLE[pick.axis]}`;
+}
+
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 /**
- * Whether a pinned main ingredient shows up in a direction's hero_ingredients
+ * Whether a pinned hero ingredient shows up in a direction's hero_ingredients
  * — a household that typed "chicken thighs" should still match a hero
  * ingredient of "chicken", so this checks either string containing the other
  * rather than requiring an exact match.
  */
-function mentionsIngredient(heroIngredients: string[], mainIngredient: string): boolean {
-  const needle = mainIngredient.trim().toLowerCase();
+function mentionsIngredient(heroIngredients: string[], pinnedHero: string): boolean {
+  const needle = pinnedHero.trim().toLowerCase();
   if (!needle) return true;
 
   return heroIngredients.some((hero) => {
@@ -66,21 +126,23 @@ function mentionsIngredient(heroIngredients: string[], mainIngredient: string): 
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2 — six lightweight options
+// Stage 2 — eight lightweight options
 // ---------------------------------------------------------------------------
 
 export interface OptionsInput {
   effortBand: EffortBand;
-  /** Pinned by the user at stage 1 — a hard constraint, not a nudge: every
-   *  option is built around it, varying method/cuisine/richness instead. */
-  mainIngredient?: string | null;
+  /** Pinned by the household at stage 1 — 0-2 entries, each a hard
+   *  constraint on all eight directions. Replaces the old single
+   *  mainIngredient field, generalized to any seed-pool axis. */
+  categoryPicks: CategoryPick[];
   /** Free text from stage 1, "anything to use up?" — a soft preference. */
   needsUsingUp?: string | null;
+  /** Stage-1 toggle — biases every generation call toward dishes that
+   *  freeze and reheat well. */
+  batchCooking?: boolean | null;
   /** Directions already rejected this session, not to be repeated. */
   avoidDirections?: string[] | null;
-  /** Permanent "not this" reactions from previous sessions (spec §5.4). */
-  excludedAxes: { axis: string; value: string }[];
-  /** Drawn by the caller from seed_pool via variance-engine.drawSeeds. */
+  /** Drawn by the caller from seed_pool via variance-engine.drawSeedSet. */
   seeds: DrawnSeed[];
   /** The just-shown eight directions, present only on a "Refresh" call. */
   previousDirections?: string[] | null;
@@ -89,13 +151,12 @@ export interface OptionsInput {
 function buildOptionsRequestBlock(input: OptionsInput): string {
   const parts: string[] = [`EFFORT BAND: ${EFFORT_BAND_TEXT[input.effortBand]}`];
 
-  if (input.mainIngredient?.trim()) {
-    parts.push(
-      `MAIN INGREDIENT — a hard constraint, not a suggestion:\n${wrapUserText(
-        "main_ingredient",
-        input.mainIngredient,
-      )}\n\nEvery one of the eight directions must be built around this. Vary the cooking method, cuisine and richness instead — eight ways to take the same ingredient, not eight unrelated dishes. Every direction's hero_ingredients must include it by name, so the household can see it was actually used, not just implied.`,
-    );
+  if (input.batchCooking) {
+    parts.push(BATCH_COOKING_INSTRUCTION);
+  }
+
+  for (const pick of input.categoryPicks) {
+    parts.push(buildPinnedBlockForOptions(pick));
   }
 
   if (input.needsUsingUp?.trim()) {
@@ -115,14 +176,6 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
     );
   }
 
-  if (input.excludedAxes.length > 0) {
-    parts.push(
-      `PERMANENTLY EXCLUDED — the household has said "not this" before; never offer these again:\n${input.excludedAxes
-        .map((e) => `- ${e.axis}: ${e.value}`)
-        .join("\n")}`,
-    );
-  }
-
   if (input.avoidDirections?.length) {
     parts.push(
       `ALREADY REJECTED — do not offer these again or near-variants of them:\n${input.avoidDirections
@@ -131,12 +184,21 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
     );
   }
 
-  const diversityAxes = input.mainIngredient?.trim()
-    ? "method, cuisine region and richness"
-    : "protein, cooking method, cuisine region and richness";
+  const ignoredFields = new Set(input.categoryPicks.map((p) => AXIS_TO_COLLISION_FIELD[p.axis]));
+  const axisWords: Record<"protein" | "method" | "cuisine", string> = {
+    protein: "protein",
+    method: "cooking method",
+    cuisine: "cuisine region",
+  };
+  const diversityAxes = joinWithAnd(
+    (["protein", "method", "cuisine"] as const)
+      .filter((f) => !ignoredFields.has(f))
+      .map((f) => axisWords[f])
+      .concat("richness"),
+  );
 
   parts.push(
-    `Produce exactly ${OPTION_COUNT} short, punchy directions to explore with the main ingredient — not finished dishes and not a title. Each is a mood-board note: a short "direction" phrase (max 80 characters, e.g. "Charred and citrus-bright"), 2-4 flavour descriptors, 2-4 texture descriptors, and 2-5 potential hero ingredients that could anchor it — not locked in yet. They must differ from one another across ${diversityAxes}.`,
+    `Produce exactly ${OPTION_COUNT} short, punchy directions to explore — not finished dishes and not a title. Each is a mood-board note: a short "direction" phrase (max 80 characters, a single line with no commas — e.g. "Charred and citrus-bright", not "Charred, citrus-bright chicken with herb yoghurt"), 2-4 flavour descriptors, 2-4 texture descriptors, 2-5 potential hero ingredients that could anchor it — not locked in yet — a one-line description in 14 words or fewer, and a distinguishing_note: one sentence on how this direction differs from the other seven in the set. They must differ from one another across ${diversityAxes}.`,
   );
 
   return parts.join("\n\n");
@@ -146,6 +208,8 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
 export async function generateOptionSummaries(caller: Caller, input: OptionsInput) {
   const requestBlock = buildOptionsRequestBlock(input);
   const previousDirections = input.previousDirections ?? [];
+  const heroPick = input.categoryPicks.find((p) => p.axis === "hero");
+  const cuisinePick = input.categoryPicks.find((p) => p.axis === "cuisine");
 
   const { data, generationId } = await runGeneration({
     ...caller,
@@ -167,20 +231,42 @@ export async function generateOptionSummaries(caller: Caller, input: OptionsInpu
         }
       }
 
-      if (input.mainIngredient?.trim()) {
+      const withCommas = response.options.filter((o) => o.direction.includes(","));
+      if (withCommas.length > 0) {
+        return `these directions contain commas, which makes them read like a finished dish rather than a short mood-board phrase: ${withCommas
+          .map((o) => `"${o.direction}"`)
+          .join(", ")}. Rewrite each as a single comma-free phrase.`;
+      }
+
+      if (heroPick) {
         const missing = response.options.filter(
-          (option) => !mentionsIngredient(option.hero_ingredients, input.mainIngredient!),
+          (option) => !mentionsIngredient(option.hero_ingredients, heroPick.value),
         );
         if (missing.length > 0) {
-          return `these directions do not name the main ingredient in hero_ingredients: ${missing
+          return `these directions do not name the hero ingredient in hero_ingredients: ${missing
             .map((o) => `"${o.direction}"`)
             .join(", ")}. Every direction must include it by name so the household can see it was honoured.`;
         }
       }
 
+      if (cuisinePick) {
+        // Soft check only — cuisine phrasing varies too much between a seed
+        // name and the model's own wording to fail the retry loop over it.
+        const mismatched = response.options.filter(
+          (o) =>
+            !o.cuisine.toLowerCase().includes(cuisinePick.value.toLowerCase()) &&
+            !cuisinePick.value.toLowerCase().includes(o.cuisine.toLowerCase()),
+        );
+        if (mismatched.length > 0) {
+          console.warn(
+            `[generation:options] cuisine pin "${cuisinePick.value}" didn't literally match option.cuisine on: ${mismatched.map((o) => o.cuisine).join(", ")}`,
+          );
+        }
+      }
+
       const collisions = findAxesCollisions(
         response.options.map((o) => o.axes),
-        { ignoreProtein: Boolean(input.mainIngredient?.trim()) },
+        { ignoreAxes: input.categoryPicks.map((p) => AXIS_TO_COLLISION_FIELD[p.axis]) },
       );
       if (collisions.length > 0) {
         const directions = collisions[0]
@@ -215,10 +301,9 @@ export async function generateOptionSummaries(caller: Caller, input: OptionsInpu
 
 export interface DishComponentsInput {
   option: Option;
-  mainIngredient?: string | null;
+  categoryPicks?: CategoryPick[] | null;
   needsUsingUp?: string | null;
-  /** Present when called as the "refresh the rest to match" follow-up. */
-  locked?: { slot: string; value: string } | null;
+  batchCooking?: boolean | null;
 }
 
 export async function generateDishComponents(caller: Caller, input: DishComponentsInput) {
@@ -234,17 +319,13 @@ Textures: ${option.textures.join(", ")}
 Hero ingredients: ${option.hero_ingredients.join(", ")}
 Roughly ${option.effort_minutes} minutes.`,
 
-    input.mainIngredient?.trim()
-      ? `MAIN INGREDIENT: ${wrapUserText("main_ingredient", input.mainIngredient)}`
-      : null,
+    ...(input.categoryPicks ?? []).map((pick) => buildPinnedBlockSingle(pick)),
 
     input.needsUsingUp?.trim()
       ? `ANYTHING TO USE UP: ${wrapUserText("needs_using_up", input.needsUsingUp)}`
       : null,
 
-    input.locked
-      ? `The household has already chosen "${input.locked.value}" for the ${input.locked.slot} slot. Suggest the remaining slots to genuinely pair with that choice, and repeat the ${input.locked.slot} slot unchanged with that as its only option.`
-      : null,
+    input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
 
     `Suggest two to five slots that are genuinely worth choosing between for this specific dish — vegetables, a hero herb or spice, a sauce/dressing/gravy, or whatever else actually varies it. Not every dish needs every kind of slot; only include what applies to this one. For each slot, give two to six named options with a short note on why each works or what it pairs with. Every option must still be true to the dish above, not turn it into a different dish.`,
   ]
@@ -269,15 +350,16 @@ Roughly ${option.effort_minutes} minutes.`,
 }
 
 // ---------------------------------------------------------------------------
-// Stage 4 — three richer variations, informed by the stage-3 tailoring
+// Stage 4 — up to three richer variations, informed by the stage-3 tailoring
 // ---------------------------------------------------------------------------
 
 export interface DishVariationsInput {
   option: Option;
   /** Slot → chosen value from stage 3. May be empty or partial. */
   componentSelections?: Record<string, string> | null;
-  mainIngredient?: string | null;
+  categoryPicks?: CategoryPick[] | null;
   needsUsingUp?: string | null;
+  batchCooking?: boolean | null;
 }
 
 export async function generateDishVariations(caller: Caller, input: DishVariationsInput) {
@@ -285,7 +367,7 @@ export async function generateDishVariations(caller: Caller, input: DishVariatio
   const hasSelections = componentSelections && Object.keys(componentSelections).length > 0;
 
   const parts = [
-    `Write three richer variations of this direction the household picked:
+    `Write up to three richer variations of this direction the household picked:
 
 Direction: ${option.direction}
 Cuisine: ${option.cuisine}
@@ -300,9 +382,7 @@ Roughly ${option.effort_minutes} minutes.`,
           .join("\n")}\n\nEvery variation must genuinely reflect these choices, not just mention them in passing.`
       : "The household did not pick specific components — use your judgement for what suits the dish best.",
 
-    input.mainIngredient?.trim()
-      ? `MAIN INGREDIENT: ${wrapUserText("main_ingredient", input.mainIngredient)}`
-      : null,
+    ...(input.categoryPicks ?? []).map((pick) => buildPinnedBlockSingle(pick)),
 
     input.needsUsingUp?.trim()
       ? `ANYTHING TO USE UP: ${wrapUserText(
@@ -311,7 +391,9 @@ Roughly ${option.effort_minutes} minutes.`,
         )}\n\nReport which of these each variation genuinely uses in uses_named_ingredients.`
       : null,
 
-    `Produce exactly three variations. They should feel like genuine alternatives on this one dish — different balances of hero ingredient, different flavour emphasis — not three near-identical rewrites of the same sentence. Each needs a title, a one-line description, its hero ingredients, and a short list of flavour descriptors (e.g. "smoky", "sharp", "sweet-heat").`,
+    input.batchCooking ? BATCH_COOKING_INSTRUCTION : null,
+
+    `Produce between one and three richer variations — default to three, but produce fewer when the tailoring choices above have already locked in enough of the dish (the sauce, the sides, the format) that a further genuinely different take isn't honest. Do not pad to three with near-duplicates described differently: for example, a beef lasagne where the béchamel, sides and format are already fixed by the household's choices might only support one or two real variations, not three. They should feel like genuine alternatives on this one dish — different balances of hero ingredient, different flavour emphasis — not near-identical rewrites of the same sentence. Each needs a title, a one-line description, its hero ingredients, and a short list of flavour descriptors (e.g. "smoky", "sharp", "sweet-heat"). If you return more than one variation, give each a distinguishing_note: one sentence on how it differs from the other variation(s) in the set. If you return exactly one, set distinguishing_note to null — there is nothing to compare it against.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -322,8 +404,16 @@ Roughly ${option.effort_minutes} minutes.`,
     requestBlock: parts,
     schema: refinedOptionsResponseSchema,
     validate: (response) => {
-      if (response.options.length !== VARIATION_COUNT) {
-        return `you returned ${response.options.length} variations but exactly ${VARIATION_COUNT} were required.`;
+      const n = response.options.length;
+      if (n < 1 || n > 3) {
+        return `you returned ${n} variations but between 1 and 3 were required.`;
+      }
+
+      if (n === 1 && response.options[0].distinguishing_note !== null) {
+        return "with only one variation, distinguishing_note has nothing to compare against — set it to null.";
+      }
+      if (n > 1 && response.options.some((o) => !o.distinguishing_note?.trim())) {
+        return "every variation needs a distinguishing_note explaining how it differs from the others, since more than one was returned.";
       }
 
       for (const variation of response.options) {
@@ -351,8 +441,9 @@ export async function generateRecipe(
     /** The stage-3 choices that shaped the chosen variation, carried through
      *  so the recipe actually uses them rather than re-deciding. */
     componentSelections?: Record<string, string> | null;
-    mainIngredient?: string | null;
+    categoryPicks?: CategoryPick[] | null;
     needsUsingUp?: string | null;
+    batchCooking?: boolean | null;
     servings: number;
     /** The card being revised at a new serving count, so the model can adjust rather than restart. */
     previous?: Recipe | null;
@@ -375,6 +466,8 @@ Write it for ${servings} ${servings === 1 ? "person" : "people"} and set base_se
     `Every quantity mentioned in a step must be written as a placeholder referencing the ingredient's id — {ing_1}, {ing_2} and so on — never as a literal amount. The app substitutes the scaled amount when it renders, so "Toss {ing_1} with {ing_4} and leave for 15 minutes" is right and "Toss 400g chicken with 2 tbsp oil" is wrong. Every id you reference must exist in the ingredients list.
 
 Mark each ingredient's scales value honestly: most things scale linearly, but salt, spices, dried chilli, oil for frying and water for boiling do not — use sublinear or fixed for those.`,
+
+    `If this dish freezes well, set freezing_notes to a short, practical note covering how to freeze it and how to defrost/reheat it — in the same register as make_ahead and leftovers. If it does not freeze well (built around fresh salad, an emulsified or cream sauce that splits, a fried or battered coating that goes soggy), set freezing_notes to null rather than forcing an unhelpful note.`,
   ];
 
   if (input.componentSelections && Object.keys(input.componentSelections).length > 0) {
@@ -387,12 +480,16 @@ Mark each ingredient's scales value honestly: most things scale linearly, but sa
     );
   }
 
-  if (input.mainIngredient?.trim()) {
-    parts.push(`MAIN INGREDIENT: ${wrapUserText("main_ingredient", input.mainIngredient)}`);
+  for (const pick of input.categoryPicks ?? []) {
+    parts.push(buildPinnedBlockSingle(pick));
   }
 
   if (input.needsUsingUp?.trim()) {
     parts.push(`ANYTHING TO USE UP: ${wrapUserText("needs_using_up", input.needsUsingUp)}`);
+  }
+
+  if (input.batchCooking) {
+    parts.push(BATCH_COOKING_INSTRUCTION);
   }
 
   if (input.previous) {

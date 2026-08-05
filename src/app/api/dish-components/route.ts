@@ -4,13 +4,17 @@ import { generateDishComponents } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
 import { optionSchema } from "@/lib/schemas/option";
 
+const categoryPickSchema = z.object({
+  axis: z.enum(["cuisine", "format", "hero"]),
+  value: z.string().max(80),
+});
+
 /** Stage 3 — tailoring suggestions (vegetables, hero herb/spice, sauce, ...) for the one dish picked at stage 2. */
 const bodySchema = z.object({
   option: optionSchema,
-  main_ingredient: z.string().max(80).nullish(),
+  category_picks: z.array(categoryPickSchema).max(2).nullish(),
   needs_using_up: z.string().max(500).nullish(),
-  /** Present on the "refresh the rest to match" follow-up after a slot changes. */
-  locked: z.object({ slot: z.string().max(60), value: z.string().max(200) }).nullish(),
+  batch_cooking: z.boolean().nullish(),
 });
 
 export async function POST(request: NextRequest) {
@@ -27,9 +31,9 @@ export async function POST(request: NextRequest) {
   try {
     const result = await generateDishComponents(caller, {
       option: parsed.data.option,
-      mainIngredient: parsed.data.main_ingredient,
+      categoryPicks: parsed.data.category_picks,
       needsUsingUp: parsed.data.needs_using_up,
-      locked: parsed.data.locked,
+      batchCooking: parsed.data.batch_cooking,
     });
 
     return NextResponse.json({

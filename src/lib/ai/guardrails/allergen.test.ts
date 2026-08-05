@@ -45,6 +45,7 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
     serving_suggestion: "Good with bread.",
     make_ahead: null,
     leftovers: null,
+    freezing_notes: null,
     ...overrides,
   };
 }
@@ -65,6 +66,8 @@ function option(overrides: Partial<Option> = {}): Option {
       richness: "light",
     },
     uses_named_ingredients: [],
+    description: "Griddled chickpeas and greens, sharp with lemon and tahini.",
+    distinguishing_note: "The only griddle-led option in the set.",
     ...overrides,
   };
 }
@@ -97,6 +100,7 @@ function refinedOption(overrides: Partial<RefinedOption> = {}): RefinedOption {
     cuisine: "Middle Eastern",
     effort_minutes: 25,
     uses_named_ingredients: [],
+    distinguishing_note: "Sharper and more acidic than the other variations.",
     ...overrides,
   };
 }
@@ -325,6 +329,24 @@ describe("checkOptionForAllergens", () => {
     expect(hits.map((h) => h.location)).toContain("flavours[0]");
   });
 
+  it("catches an allergen hidden in the description", () => {
+    const hits = checkOptionForAllergens(
+      option({ description: "Finished with a spoonful of peanut butter." }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("description");
+  });
+
+  it("catches an allergen hidden in the distinguishing note", () => {
+    const hits = checkOptionForAllergens(
+      option({ distinguishing_note: "The only one of the eight using peanut butter." }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("distinguishing_note");
+  });
+
   it("passes a clean option", () => {
     expect(checkOptionForAllergens(option(), ["peanuts"])).toEqual([]);
   });
@@ -389,7 +411,22 @@ describe("checkRefinedOptionForAllergens", () => {
     expect(hits.map((h) => h.location)).toContain("flavours[0]");
   });
 
+  it("catches an allergen hidden in the distinguishing note", () => {
+    const hits = checkRefinedOptionForAllergens(
+      refinedOption({ distinguishing_note: "Richer than the others thanks to peanut butter." }),
+      ["peanuts"],
+    );
+
+    expect(hits.map((h) => h.location)).toContain("distinguishing_note");
+  });
+
   it("passes a clean refined option", () => {
     expect(checkRefinedOptionForAllergens(refinedOption(), ["peanuts"])).toEqual([]);
+  });
+
+  it("passes when the sole variation has no distinguishing note", () => {
+    expect(
+      checkRefinedOptionForAllergens(refinedOption({ distinguishing_note: null }), ["peanuts"]),
+    ).toEqual([]);
   });
 });

@@ -71,6 +71,10 @@ export const recipeSchema = z.object({
   serving_suggestion: z.string(),
   make_ahead: z.string().nullable(),
   leftovers: z.string().nullable(),
+  /** How it freezes and how to defrost/reheat it, in the same practical
+   *  register as make_ahead/leftovers. Null when the dish doesn't freeze
+   *  well, rather than forcing an unhelpful note. */
+  freezing_notes: z.string().nullable(),
 });
 
 export type Recipe = z.infer<typeof recipeSchema>;

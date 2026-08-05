@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { EffortGate } from "@/components/effort-gate";
 import { OptionFlow, type EffortInput } from "@/components/option-flow";
+import type { SeedAxis } from "@/lib/db/types";
 import type { UnitPrefs } from "@/lib/recipe/scale";
 
 /**
@@ -12,32 +13,32 @@ import type { UnitPrefs } from "@/lib/recipe/scale";
  * directions, tailoring, three variations, the recipe) — the zero-input
  * "Surprise us/me" tap the PRD opened with has been deliberately removed;
  * see CLAUDE.md D5. "Planner" is a placeholder for a not-yet-built feature.
+ *
+ * There is no blanket "Start over" any more (CLAUDE.md D6) — going back is
+ * a linear per-stage chain instead: `input` is kept alive (not cleared)
+ * when returning to `"gate"`, so stage 2's Back button lands on a fully
+ * prefilled gate rather than a blank one.
  */
 export function HomeClient({
   defaultServings,
   unitPrefs,
+  seedPoolNames,
 }: {
   defaultServings: number;
   unitPrefs?: UnitPrefs;
+  seedPoolNames: Record<SeedAxis, string[]>;
 }) {
   const [mode, setMode] = useState<"idle" | "gate" | "running">("idle");
   const [input, setInput] = useState<EffortInput | null>(null);
 
   if (mode === "running" && input) {
     return (
-      <div className="space-y-5">
-        <button
-          type="button"
-          onClick={() => {
-            setMode("idle");
-            setInput(null);
-          }}
-          className="min-h-11 text-sm text-muted underline"
-        >
-          Start over
-        </button>
-        <OptionFlow input={input} defaultServings={defaultServings} unitPrefs={unitPrefs} />
-      </div>
+      <OptionFlow
+        input={input}
+        defaultServings={defaultServings}
+        unitPrefs={unitPrefs}
+        onBack={() => setMode("gate")}
+      />
     );
   }
 
@@ -52,6 +53,8 @@ export function HomeClient({
           Back
         </button>
         <EffortGate
+          initialValues={input}
+          seedPoolNames={seedPoolNames}
           onSubmit={(gateInput) => {
             setInput(gateInput);
             setMode("running");

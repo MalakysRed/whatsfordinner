@@ -208,6 +208,8 @@ export function checkOptionForAllergens(
   return scan(
     [
       { location: "direction", text: option.direction },
+      { location: "description", text: option.description },
+      { location: "distinguishing_note", text: option.distinguishing_note },
       ...option.flavours.map((item, i) => ({ location: `flavours[${i}]`, text: item })),
       ...option.textures.map((item, i) => ({ location: `textures[${i}]`, text: item })),
       ...option.hero_ingredients.map((item, i) => ({
@@ -255,6 +257,7 @@ export function checkRefinedOptionForAllergens(
     [
       { location: "title", text: option.title },
       { location: "description", text: option.description },
+      { location: "distinguishing_note", text: option.distinguishing_note },
       ...option.hero_ingredients.map((item, i) => ({
         location: `hero_ingredients[${i}]`,
         text: item,

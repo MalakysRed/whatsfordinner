@@ -22,6 +22,13 @@
 
   --danger: #a8261a;
   --success: #2f6b3f;
+
+  /* Stage-2 card facts (item 8) — distinct from --accent and each other,
+     contrast-checked against --background/--raised the same as everything
+     else here. */
+  --detail: #3d6f91; /* cuisine · time */
+  --flavour: #6a4b8f; /* flavours/textures */
+  --hero: #7a6a12; /* hero ingredients */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -38,6 +45,10 @@
 
     --danger: #f08379;
     --success: #7cc08e;
+
+    --detail: #8ec2e0;
+    --flavour: #c6a4e8;
+    --hero: #d9b356;
   }
 }
 
@@ -52,6 +63,9 @@
   --color-on-accent: var(--on-accent);
   --color-danger: var(--danger);
   --color-success: var(--success);
+  --color-detail: var(--detail);
+  --color-flavour: var(--flavour);
+  --color-hero: var(--hero);
 }
 
 body {

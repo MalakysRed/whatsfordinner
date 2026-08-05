@@ -40,6 +40,15 @@ export function wrapUserText(label: string, text: string): string {
   return `<user_${label}>\n${text.trim()}\n</user_${label}>`;
 }
 
+/**
+ * Stage-1 "batch cooking" toggle — shared across every generation call the
+ * flow can trigger (options, tailoring, variations, the recipe itself),
+ * so nothing offered at any step is something that freezes or reheats
+ * badly once the toggle is on.
+ */
+export const BATCH_COOKING_INSTRUCTION =
+  "BATCH COOKING: this will be cooked in bulk and frozen in portions, then reheated later. Everything offered must freeze and reheat well — no dish built around fresh salad, mayonnaise or other emulsified sauces that split, cream sauces that split on reheating, fried or battered coatings that go soggy, or anything where boiled potatoes/pasta are the point rather than an incidental component. Favour stews, curries, braises, bolognese-style sauces, soups, casseroles, chillis and similar.";
+
 export function buildSystemPrompt(mealType: MealType): string {
   const meal = MEAL_TYPE_WORD[mealType];
 

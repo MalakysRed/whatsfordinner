@@ -3,7 +3,7 @@
 # whatsfordinner
 
 Two people, one kitchen, one recurring stalemate. The app turns "what's for dinner?"
-into six option cards, then a full scalable recipe card for whichever one gets
+into eight option cards, then a full scalable recipe card for whichever one gets
 committed to. See `docs/prd.md` for the original v1 shape and the feature spec for
 the variance-engine rewrite this codebase now implements.
 
@@ -13,8 +13,12 @@ reason to exist. `Craft a recipe` is the sole entry point (see D5) — keep its 
 stages tight rather than adding a sixth.
 
 **Core principle of the generation flow: variance is injected by the application,
-not requested by the user.** There is no ingredient bank, no taste/cuisine picker,
-and no pre-generation constraint screen — see "The variance engine", below.
+not requested by the user.** There is no ingredient bank and no standing taste
+profile. Stage 1 does allow up to two optional category picks (cuisine/format/hero,
+sourced from `seed_pool`, free text also accepted) that pin those axes as a hard
+constraint across all eight directions — a deliberate, bounded exception to "no
+pre-generation constraint screen," not a reopening of the ingredient-bank question
+D3 closed. See "The variance engine", below.
 
 ## Stack
 
@@ -40,26 +44,32 @@ after parsing. On a hit the card is discarded and regenerated, then hard-errors.
 only line of defence on an allergy.
 
 **The variance engine, not the user, injects variety.** `src/lib/generation/variance-engine.ts`
-draws seeds from `seed_pool` (weighted by UK season, format filtered by effort band,
-excluding anything drawn in the household's last three generations), enforces that
-the six options differ across protein/method/cuisine, and runs a token-overlap dedup
-guardrail against the previous set. All three reuse `runGeneration`'s existing
-retry-once-with-a-correction machinery in `src/lib/ai/client.ts` — a diversity or
-dedup failure is just another `validate` rejection, logged the same way an allergen
-hit is. There used to be a "recency weighting" slot quota that let a previously-cooked
-recipe fill a suggestion slot at no API cost; it was removed rather than adapted to
-six options, since a book-pull has no `swaps`/`techniques`/diversity tags to offer.
+draws seeds via `drawSeedSet` from `seed_pool` (weighted by UK season, format filtered
+by effort band, excluding anything drawn in the household's last three generations) —
+one seed per direction slot, cycling through axes, so all eight directions get genuine
+per-call randomised input rather than a couple of seeded slots and six freely-improvised
+ones. It enforces that the eight options differ across protein/method/cuisine via
+`findAxesCollisions`, whose `ignoreAxes` option exempts whichever axes stage 1 pinned as
+a hard constraint (see the category-picks exception above) from that diversity check, and
+runs a token-overlap dedup guardrail against the previous set. All of this reuses
+`runGeneration`'s existing retry-once-with-a-correction machinery in `src/lib/ai/client.ts`
+— a diversity or dedup failure is just another `validate` rejection, logged the same way
+an allergen hit is. There used to be a "recency weighting" slot quota that let a
+previously-cooked recipe fill a suggestion slot at no API cost; it was removed rather
+than adapted to eight options, since a book-pull has no `swaps`/`techniques`/diversity
+tags to offer.
 
 **Saved recipes are immutable artefacts.** `recipes.payload` holds the full recipe
 JSON, with ingredients stored inline rather than as foreign keys into anything else —
 there is no ingredient bank for a saved recipe to depend on.
 
 **Free-text feedback is data, never instruction.** The stage-1 "anything to use up?"
-field and per-card reaction text are passed inside a delimited block and must not
-override dietary or allergen rules. There is deliberately no free-text mutation path
-once a dish is committed at stage 3 — only servings and the dish's own pre-validated
-`swaps` are editable, so a beginner cannot request a substitution the model never
-vetted.
+field and any free-text category pick are passed inside a delimited block and must
+not override dietary or allergen rules. There is deliberately no free-text mutation
+path once a dish is committed at stage 3 — only servings and the dish's own
+pre-validated `swaps` are editable, so a beginner cannot request a substitution the
+model never vetted. (Per-card "Not this" feedback existed at one point and was
+removed — see D6 — so there is no longer a per-card reaction channel at all.)
 
 **Auth is checked in three places.** RLS at the database, an auth check in every
 route handler and server action, and session refresh in the proxy. Next.js docs warn
@@ -127,6 +137,17 @@ All in `src/lib/ai/models.ts`, and all easy to get wrong from memory:
   suggestion. `Craft a recipe` is now the sole entry point on the home screen.
   A `Planner` button sits alongside it, disabled, as a placeholder ("Coming
   soon") for a not-yet-built feature — do not wire it up without asking first.
+- **D6 — no blanket "Start over"; Back is a per-stage chain instead.** The flow
+  used to offer a single "Start over" control that reset everything back to stage
+  1 with a blank gate. Removed: every stage but the first and the final recipe
+  card now has its own Back button that just steps to the previous stage, and
+  `home-client.tsx` keeps the stage-1 `EffortInput` alive rather than clearing it
+  when the household backs out of stage 2 — so stage 2's Back button returns to a
+  gate prefilled with the previous band, category picks, "anything to use up" and
+  batch-cooking choice, not an empty form. The recipe card intentionally has no
+  Back button at all; once you're looking at a scaled recipe, going back would
+  discard state (the chosen dish, tailoring, variation) that nothing downstream
+  recreates.
 
 ## Commands
 
