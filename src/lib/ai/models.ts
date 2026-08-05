@@ -93,10 +93,10 @@ export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> 
   flavour: "low",
   plate: "low",
   suggestions: "low",
-  // Raised from "medium": stage 4 hands the recipe call an already-chosen,
-  // fully-specified dish, so the remaining work is entirely about getting
-  // quantities, timings and method right — worth spending on.
-  recipe: "high",
+  // Was briefly "high" — dropped back to "medium" after production recipe
+  // calls started failing (network-level errors on the attempt itself, not
+  // a validation rejection). Revisit once the generations table shows why.
+  recipe: "medium",
   options: "low",
   options_refine: "low",
   dish_components: "low",
