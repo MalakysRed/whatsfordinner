@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { generateOptionSummaries } from "@/lib/ai/generate";
+import { generateOptionSummaries, OPTION_COUNT } from "@/lib/ai/generate";
 import { prepareGeneration, toErrorResponse } from "@/lib/api/handler";
-import { drawSeeds } from "@/lib/generation/variance-engine";
+import { drawSeedSet } from "@/lib/generation/variance-engine";
 import { fetchActiveSeedPool, recentSeedNames } from "@/lib/generation/seed-draw";
 import { fetchExcludedAxes } from "@/lib/generation/exclusions";
 import { createClient } from "@/lib/supabase/server";
@@ -46,11 +46,12 @@ export async function POST(request: NextRequest) {
       ? (["cuisine", "format"] as const)
       : (["cuisine", "format", "hero"] as const);
 
-    const seeds = drawSeeds(
+    const seeds = drawSeedSet(
       pool,
       caller.context.season,
       body.effort_band,
       excludedSeedNames,
+      OPTION_COUNT,
       Math.random,
       [...seedAxes],
     );

@@ -49,6 +49,52 @@ export function drawSeeds(
     .filter((seed): seed is DrawnSeed => seed !== null);
 }
 
+/**
+ * One seed per direction, cycling through the requested axes, instead of one
+ * seed per axis shared across the whole set. A single seed per axis only
+ * ever anchored two or three of the eight directions; every unseeded
+ * direction was left to improvise from scratch against a near-identical
+ * prompt call to call, and with nothing distinguishing them the model's
+ * free choices collapsed onto its single most-probable "default" — which is
+ * what made one direction (usually the first) repeat so consistently.
+ * Reuses the exact same weighted/seasonal/effort-band-filtered draw as
+ * drawSeeds for every slot.
+ *
+ * Duplicate seed values across slots are fine and expected once a small
+ * pool (format, filtered to one effort band, is often just a handful of
+ * rows) runs out of fresh candidates — two directions sharing a starting
+ * cuisine or hero still have to differ on everything else per
+ * findAxesCollisions. Within one call, already-used names are avoided where
+ * possible so a small pool doesn't just hand back the same row eight times;
+ * repeats only happen once an axis's eligible pool is genuinely exhausted.
+ */
+export function drawSeedSet(
+  pool: SeedPoolRow[],
+  season: Season,
+  effortBand: EffortBand,
+  excludedNames: ReadonlySet<string>,
+  slotCount: number,
+  random: () => number = Math.random,
+  axes: SeedAxis[] = ["cuisine", "format", "hero"],
+): DrawnSeed[] {
+  const usedThisBatch = new Set<string>();
+  const seeds: DrawnSeed[] = [];
+
+  for (let i = 0; i < slotCount; i++) {
+    const axis = axes[i % axes.length];
+    const combinedExclusions = new Set([...excludedNames, ...usedThisBatch]);
+    const fresh = drawOne(pool, axis, season, effortBand, combinedExclusions, random);
+    const picked = fresh ?? drawOne(pool, axis, season, effortBand, excludedNames, random);
+
+    if (picked) {
+      seeds.push(picked);
+      usedThisBatch.add(picked.name);
+    }
+  }
+
+  return seeds;
+}
+
 function drawOne(
   pool: SeedPoolRow[],
   axis: SeedAxis,

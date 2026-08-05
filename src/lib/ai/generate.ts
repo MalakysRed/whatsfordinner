@@ -39,7 +39,8 @@ interface Caller {
   context: HouseholdContext;
 }
 
-const OPTION_COUNT = 8;
+/** Also the seed-set size drawn per call — see drawSeedSet in variance-engine.ts. */
+export const OPTION_COUNT = 8;
 const VARIATION_COUNT = 3;
 
 const EFFORT_BAND_TEXT: Record<EffortBand, string> = {
@@ -108,8 +109,8 @@ function buildOptionsRequestBlock(input: OptionsInput): string {
 
   if (input.seeds.length > 0) {
     parts.push(
-      `SEEDS — inspiration for AT MOST TWO of the eight directions, not all of them:\n${input.seeds
-        .map((s) => `- ${s.axis}: ${s.name}`)
+      `SEEDS — one loose starting point per direction, in the same order the directions will appear: seed 1 is a starting point for your first direction, seed 2 for your second, and so on. Each just anchors an idea — a cuisine, a format, a hero ingredient — not a locked recipe; invent the flavour, texture and richness yourself, and the set still needs to differ across the axes below.\n${input.seeds
+        .map((s, i) => `${i + 1}. ${s.axis}: ${s.name}`)
         .join("\n")}`,
     );
   }

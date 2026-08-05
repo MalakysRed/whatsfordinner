@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { drawSeeds, findAxesCollisions, findDuplicateTitles, tokenOverlap } from "./variance-engine";
+import {
+  drawSeeds,
+  drawSeedSet,
+  findAxesCollisions,
+  findDuplicateTitles,
+  tokenOverlap,
+} from "./variance-engine";
 import type { SeedPoolRow } from "@/lib/db/types";
 import type { OptionAxes } from "@/lib/schemas/option";
 
@@ -82,6 +88,76 @@ describe("drawSeeds", () => {
     const drawn = drawSeeds(pool, "autumn", "standard", new Set(), Math.random, ["cuisine", "format"]);
 
     expect(drawn.map((s) => s.axis).sort()).toEqual(["cuisine", "format"]);
+  });
+});
+
+describe("drawSeedSet", () => {
+  it("draws one seed per slot, cycling through the axes", () => {
+    const pool: SeedPoolRow[] = [
+      seed({ axis: "cuisine", name: "Thai" }),
+      seed({ axis: "format", name: "Traybake", tags: ["standard"] }),
+      seed({ axis: "hero", name: "Squash", tags: ["autumn"] }),
+    ];
+
+    const drawn = drawSeedSet(pool, "autumn", "standard", new Set(), 6);
+
+    expect(drawn).toHaveLength(6);
+    expect(drawn.map((s) => s.axis)).toEqual([
+      "cuisine",
+      "format",
+      "hero",
+      "cuisine",
+      "format",
+      "hero",
+    ]);
+  });
+
+  it("seeds every slot, not just a couple, given a rich enough pool", () => {
+    const pool: SeedPoolRow[] = [
+      seed({ axis: "cuisine", name: "Thai" }),
+      seed({ axis: "cuisine", name: "Mexican" }),
+      seed({ axis: "cuisine", name: "Italian" }),
+      seed({ axis: "format", name: "Traybake", tags: ["standard"] }),
+      seed({ axis: "format", name: "One-pan", tags: ["standard"] }),
+      seed({ axis: "format", name: "Grill", tags: ["standard"] }),
+      seed({ axis: "hero", name: "Squash", tags: ["autumn"] }),
+      seed({ axis: "hero", name: "Aubergine", tags: ["autumn"] }),
+      seed({ axis: "hero", name: "Leek", tags: ["autumn"] }),
+    ];
+
+    const drawn = drawSeedSet(pool, "autumn", "standard", new Set(), 8);
+
+    expect(drawn).toHaveLength(8);
+  });
+
+  it("prefers not to repeat a name already used earlier in the same batch", () => {
+    const pool: SeedPoolRow[] = [
+      seed({ axis: "cuisine", name: "Thai" }),
+      seed({ axis: "cuisine", name: "Mexican" }),
+    ];
+
+    const drawn = drawSeedSet(pool, "autumn", "standard", new Set(), 2, () => 0, ["cuisine"]);
+
+    expect(drawn.map((s) => s.name)).toEqual(["Thai", "Mexican"]);
+  });
+
+  it("falls back to repeating a name once the axis pool is exhausted", () => {
+    const pool: SeedPoolRow[] = [seed({ axis: "cuisine", name: "Thai" })];
+
+    const drawn = drawSeedSet(pool, "autumn", "standard", new Set(), 3, Math.random, ["cuisine"]);
+
+    expect(drawn.map((s) => s.name)).toEqual(["Thai", "Thai", "Thai"]);
+  });
+
+  it("respects the effort-band filter on every format slot, not just the first", () => {
+    const pool: SeedPoolRow[] = [
+      seed({ axis: "format", name: "Slow braise", tags: ["project"] }),
+      seed({ axis: "format", name: "Stir fry", tags: ["quick"] }),
+    ];
+
+    const drawn = drawSeedSet(pool, "winter", "quick", new Set(), 4, Math.random, ["format"]);
+
+    expect(drawn.every((s) => s.name === "Stir fry")).toBe(true);
   });
 });
 
