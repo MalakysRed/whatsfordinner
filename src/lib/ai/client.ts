@@ -171,6 +171,10 @@ export async function runGeneration<T extends z.ZodType>(
     }
 
     if (!parsed) {
+      console.error(`[generation:${type}] attempt ${attempt} did not match schema`, {
+        rawContent,
+      });
+
       lastGenerationId = await logGeneration({
         ...request,
         model: model.id,
@@ -189,6 +193,11 @@ export async function runGeneration<T extends z.ZodType>(
     const problem = validate?.(parsed) ?? null;
 
     if (problem) {
+      console.error(`[generation:${type}] attempt ${attempt} rejected by validate`, {
+        problem,
+        parsed,
+      });
+
       lastGenerationId = await logGeneration({
         ...request,
         model: model.id,
