@@ -279,20 +279,6 @@ export interface DishVariationsInput {
   needsUsingUp?: string | null;
 }
 
-/** Pairwise near-duplicate check among a small set — used for the three variations,
- *  which are meant to vary on a theme but not repeat each other outright. */
-function findPairwiseDuplicates(titles: string[], threshold = 0.5): [number, number][] {
-  const pairs: [number, number][] = [];
-  for (let i = 0; i < titles.length; i++) {
-    for (let j = i + 1; j < titles.length; j++) {
-      if (tokenOverlap(titles[i], titles[j]) > threshold || tokenOverlap(titles[j], titles[i]) > threshold) {
-        pairs.push([i, j]);
-      }
-    }
-  }
-  return pairs;
-}
-
 export async function generateDishVariations(caller: Caller, input: DishVariationsInput) {
   const { option, componentSelections } = input;
   const hasSelections = componentSelections && Object.keys(componentSelections).length > 0;
@@ -344,12 +330,6 @@ Roughly ${option.effort_minutes} minutes.`,
         if (hits.length > 0) {
           return `"${variation.title}" contains a declared allergen (${describeHits(hits)}). Every variation must avoid these entirely.`;
         }
-      }
-
-      const duplicates = findPairwiseDuplicates(response.options.map((o) => o.title));
-      if (duplicates.length > 0) {
-        const [i, j] = duplicates[0];
-        return `"${response.options[i].title}" and "${response.options[j].title}" are too close to each other. Produce three genuinely different variations, not near-identical rewrites.`;
       }
 
       return null;

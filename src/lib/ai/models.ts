@@ -93,9 +93,8 @@ export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> 
   flavour: "low",
   plate: "low",
   suggestions: "low",
-  // Was briefly "high" — dropped back to "medium" after production recipe
-  // calls started failing (network-level errors on the attempt itself, not
-  // a validation rejection). Revisit once the generations table shows why.
+  // Was briefly "high" — dropped back to "medium". The real production
+  // failure turned out to be unrelated to effort: see MAX_TOKENS_FOR_CALL.
   recipe: "medium",
   options: "low",
   options_refine: "low",
@@ -112,9 +111,13 @@ export const MAX_TOKENS_FOR_CALL: Record<GenerationType, number> = {
   flavour: 4_000,
   plate: 4_000,
   suggestions: 12_000,
-  // Headroom for high effort's larger thinking budget, on top of the visible
-  // output.
-  recipe: 24_000,
+  // The @anthropic-ai/sdk client refuses non-streaming calls above ~21,333
+  // tokens outright (it estimates the call could exceed its 10-minute
+  // non-streaming timeout and throws before ever making the request — see
+  // `calculateNonstreamingTimeout` in the SDK), so this has a hard ceiling
+  // until runGeneration moves to streaming. 20,000 leaves headroom for the
+  // visible output on top of thinking without crossing it.
+  recipe: 20_000,
   // Eight lightweight cards — a direction phrase, flavours/textures, a handful of short fields.
   options: 8_000,
   options_refine: 8_000,
