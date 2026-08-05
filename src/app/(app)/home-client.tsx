@@ -12,8 +12,9 @@ import type { UnitPrefs } from "@/lib/recipe/scale";
  * a default effort band and goes straight to eight options generated from
  * silent context alone. Guard that in review — it is the whole reason the
  * app exists, and anything added in front of it is a regression however good
- * it looks. "Choose your effort" is the one-question stage-1 gate for when
- * the household wants to say how much cooking they're up for.
+ * it looks. "Craft a recipe" is the entry point into the full build-your-own
+ * flow (time band, eight directions, tailoring, three variations, the
+ * recipe) for when the household wants to steer rather than be surprised.
  */
 export function HomeClient({
   defaultServings,
@@ -84,7 +85,7 @@ export function HomeClient({
         onClick={() => setMode("gate")}
         className="flex min-h-24 w-full flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4 text-left"
       >
-        <span className="text-lg font-medium">Choose your effort</span>
+        <span className="text-lg font-medium">Craft a recipe</span>
         <span className="mt-0.5 text-sm text-muted">Quick, standard, or a project</span>
       </button>
     </div>
