@@ -136,6 +136,17 @@ export async function runGeneration<T extends z.ZodType>(
       rawContent = message.content;
       latencyMs = Date.now() - startedAt;
     } catch (error) {
+      // Surfaced only in the generations table until now, which makes a
+      // failing call in production undebuggable without a DB query — log the
+      // full shape (status/type from the Anthropic SDK's APIError, if that's
+      // what this is) to stdout so it shows up in the runtime logs too.
+      console.error(`[generation:${type}] attempt ${attempt} failed`, {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        status: (error as { status?: unknown })?.status,
+        errorType: (error as { error?: { type?: unknown } })?.error?.type,
+      });
+
       await logGeneration({
         ...request,
         model: model.id,
