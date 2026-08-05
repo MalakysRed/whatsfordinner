@@ -93,9 +93,12 @@ export const EFFORT_FOR_CALL: Record<GenerationType, "low" | "medium" | "high"> 
   flavour: "low",
   plate: "low",
   suggestions: "low",
-  // Was briefly "high" — dropped back to "medium". The real production
-  // failure turned out to be unrelated to effort: see MAX_TOKENS_FOR_CALL.
-  recipe: "medium",
+  // Stage 4 hands the recipe call an already-chosen, fully-specified dish,
+  // so the remaining work is entirely about getting quantities, timings and
+  // method right — worth spending on. (Briefly dropped to "medium" while
+  // chasing a production failure that turned out to be about max_tokens,
+  // not effort — see MAX_TOKENS_FOR_CALL.recipe.)
+  recipe: "high",
   options: "low",
   options_refine: "low",
   dish_components: "low",
