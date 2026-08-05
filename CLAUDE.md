@@ -9,7 +9,7 @@ the variance-engine rewrite this codebase now implements.
 
 **The thing to protect:** time from opening the app to "right, that one" under 90
 seconds. Every screen added to the front of that funnel works against the product's
-reason to exist. `Surprise us` stays one tap — it skips the effort-band question
+reason to exist. `Surprise me` stays one tap — it skips the effort-band question
 entirely rather than asking it.
 
 **Core principle of the generation flow: variance is injected by the application,

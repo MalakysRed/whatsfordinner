@@ -8,7 +8,7 @@ import type { UnitPrefs } from "@/lib/recipe/scale";
 /**
  * The home screen.
  *
- * "Surprise us" is one tap and takes no input: it skips stage 1 entirely with
+ * "Surprise me" is one tap and takes no input: it skips stage 1 entirely with
  * a default effort band and goes straight to eight options generated from
  * silent context alone. Guard that in review — it is the whole reason the
  * app exists, and anything added in front of it is a regression however good
@@ -69,10 +69,10 @@ export function HomeClient({
       <button
         type="button"
         onClick={() => setMode("gate")}
-        className="flex min-h-24 w-full flex-col justify-center rounded-2xl border border-line bg-raised px-5 py-4 text-left"
+        className="min-h-32 w-full rounded-3xl bg-accent px-6 py-8 text-left text-on-accent"
       >
-        <span className="text-lg font-medium">Craft a recipe</span>
-        <span className="mt-0.5 text-sm text-muted">Guided recipe design</span>
+        <span className="block text-2xl font-semibold tracking-tight">Craft a recipe</span>
+        <span className="mt-1 block text-base opacity-90">Guided recipe design</span>
       </button>
 
       <button
@@ -83,7 +83,7 @@ export function HomeClient({
         }}
         className="min-h-32 w-full rounded-3xl bg-accent px-6 py-8 text-left text-on-accent"
       >
-        <span className="block text-2xl font-semibold tracking-tight">Surprise us</span>
+        <span className="block text-2xl font-semibold tracking-tight">Surprise me</span>
         <span className="mt-1 block text-base opacity-90">
           Eight directions from what you like. No questions.
         </span>
