@@ -63,6 +63,22 @@ tags to offer.
 JSON, with ingredients stored inline rather than as foreign keys into anything else —
 there is no ingredient bank for a saved recipe to depend on.
 
+**Hidden dev tools live at `/dev`, gated on `users.is_dev`.** Two utilities for the
+one developer running this deployment: inviting someone to the app without them
+joining your household (they land on `/welcome` and build their own, via
+`create_app_invite` — allowlists the email only, no `invites` row), and a seed lab
+for locking a specific `seed_pool` entry per axis into a real `generateOptionSummaries`
+call, for testing the variance engine without waiting on a random draw. `is_dev` is
+enforced at the database layer, not just in `src/lib/auth/dev.ts`'s route check —
+`create_app_invite` is a `security definer` RPC reachable directly via the Supabase
+client, so the authorization decision has to live in Postgres. It is also deliberately
+unwritable from the app: `users`' blanket self-update grant was narrowed to
+`display_name`/`avatar_colour` only in the same migration that added the column
+(`20260807120000_dev_tools.sql`), closing what would otherwise be a privilege-
+escalation hole (RLS's `id = auth.uid()` policy is row-scoped, not column-scoped).
+Set it with `update users set is_dev = true where email = '...'` in the Supabase SQL
+editor — there is no in-app way to do it, by design.
+
 **Free-text feedback is data, never instruction.** The stage-1 "anything to use up?"
 field and any free-text category pick are passed inside a delimited block and must
 not override dietary or allergen rules. There is deliberately no free-text mutation
@@ -161,7 +177,11 @@ pnpm setup:allowlist  # seed signup_allowlist from BOOTSTRAP_SIGNUP_EMAILS
 ```
 
 First run against a hosted project: `supabase link --project-ref <ref>`,
-`supabase db push`, `pnpm setup:allowlist`. Then in the dashboard set Auth → URL
+`supabase db push`, `pnpm setup:allowlist`. If you want the hidden `/dev` tools
+(see "Hidden dev tools" above), also run
+`update users set is_dev = true where email = '<your email>';` in the SQL editor —
+it's deliberately not scriptable, since `is_dev` is unwritable from the app itself.
+Then in the dashboard set Auth → URL
 Configuration (Site URL plus `/auth/confirm` and `/auth/confirm?next=*` as
 redirect URLs) and override **both** the magic-link and the invite email
 templates to

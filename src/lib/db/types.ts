@@ -43,6 +43,9 @@ export interface UserRow {
   display_name: string | null;
   avatar_colour: string | null;
   created_at: string;
+  /** Gates the hidden /dev tools. DB-enforced and unwritable from the app —
+   *  see the 20260807120000_dev_tools.sql migration. */
+  is_dev: boolean;
 }
 
 export interface HouseholdRow {
