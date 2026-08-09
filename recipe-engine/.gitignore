@@ -1,0 +1,4 @@
+# Vitest writes its cache here because this directory is its own `root`.
+# The repo-level .gitignore anchors /node_modules to the repo root, so it does
+# not cover this one.
+node_modules/
