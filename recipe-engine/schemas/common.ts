@@ -176,14 +176,19 @@ export const ingredientStateSchema = z.enum([
  *
  * It is deliberately absent from `archetypeSchema`: reversion is not enforced,
  * it simply *is*, because there is no stored field to overwrite or override.
+ *
+ * Two values only. A `community_verified` state was considered and
+ * deliberately left out: the cook log does not exist yet, and when it does,
+ * community verification will need a threshold, a cook count and a link
+ * between cook entries and archetype versions — more than a third branch in
+ * the derivation. A placeholder now would almost certainly be the wrong shape
+ * later, and an unreachable enum value invites incorrect wiring.
  */
 export const verificationStatusSchema = z.enum([
-  /** Authored from research, never cooked — or cooked, then restructured. */
+  /** Never cooked, or cooked against a structure since changed. */
   "unverified",
   /** Cooked by the author against the current structure. */
   "author_verified",
-  /** Cook log cleared the confidence threshold. */
-  "community_verified",
 ]);
 
 /**

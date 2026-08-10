@@ -77,7 +77,12 @@ export const archetypeSchema = z
     verified_at: z.iso.datetime().optional(),
     /** What the structure was at that moment. */
     verified_structure_hash: z.string().min(1).optional(),
-    /** What was wrong when it was cooked. */
+    /**
+     * What was wrong when it was cooked. Requires `verified_at` — it records
+     * what happened during a cook, so it cannot precede one. General
+     * uncertainty about an unverified archetype belongs in `authoring_notes`,
+     * which exists for exactly that.
+     */
     verification_note: z.string().optional(),
 
     default_servings: z.number().int().min(1).default(4),
@@ -105,6 +110,15 @@ export const archetypeSchema = z
       message:
         "verified_at and verified_structure_hash must both be present or both absent",
       path: ["verified_structure_hash"],
+    },
+  )
+  // CHECK (verification_note IS NULL OR verified_at IS NOT NULL)
+  .refine(
+    (a) => a.verification_note === undefined || a.verified_at !== undefined,
+    {
+      message:
+        "verification_note requires verified_at — use authoring_notes for an uncooked archetype",
+      path: ["verification_note"],
     },
   );
 

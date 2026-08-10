@@ -7,6 +7,7 @@ import {
   slotOptionSchema,
   slotSchema,
   techniqueSchema,
+  verificationStatusSchema,
   type Archetype,
   type ArchetypeInput,
   type ArchetypeStep,
@@ -498,6 +499,41 @@ describe("schemas: verification integrity", () => {
     ).toBe(true);
   });
 
+  it("has only two verification states", () => {
+    expect(verificationStatusSchema.options).toEqual([
+      "unverified",
+      "author_verified",
+    ]);
+    // Considered and left out: community verification needs a threshold, a
+    // cook count and a link between cook entries and archetype versions.
+    expect(verificationStatusSchema.safeParse("community_verified").success).toBe(
+      false,
+    );
+  });
+
+  it("gates verification_note behind verified_at", () => {
+    // Uncooked uncertainty belongs in authoring_notes.
+    expect(
+      archetypeSchema.safeParse({
+        ...archetype(),
+        verification_note: "The sauce split.",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      archetypeSchema.safeParse({
+        ...archetype(),
+        verified_at: VERIFIED_AT,
+        verified_structure_hash: "abc",
+        verification_note: "The sauce split.",
+      }).success,
+    ).toBe(true);
+
+    expect(
+      archetypeSchema.safeParse({ ...archetype(), authoring_notes: "Unsure." }).success,
+    ).toBe(true);
+  });
+
   it("requires verified_at to be an ISO timestamp", () => {
     expect(
       archetypeSchema.safeParse({
@@ -736,6 +772,38 @@ describe("validate: identity", () => {
     expect(codes(issues)).toContain("duplicate_step_slug");
   });
 
+  it("catches a duplicate in consumes_slots", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [archetype()],
+        steps: [step({ consumes_slots: ["fixture_main", "fixture_main"] })],
+        slots: [slot()],
+      }),
+    );
+    expect(codes(issues)).toContain("duplicate_set_member");
+    expect(formatIssues(issues)).toContain("fixture_main");
+  });
+
+  it("catches a duplicate in merges_from", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [archetype()],
+        steps: [
+          step({ slug: "tarka", position: 1, vessel_id: "tarka" }),
+          step({
+            slug: "combine",
+            position: 2,
+            operates_on: "both",
+            merges_from: ["tarka", "tarka"],
+          }),
+        ],
+      }),
+    );
+    expect(codes(issues)).toContain("duplicate_set_member");
+  });
+
   it("allows the same step slug on different archetypes", () => {
     const issues = validate(
       emptyDataset({
@@ -850,11 +918,16 @@ describe("reportVerification", () => {
     );
   });
 
-  it("formats a build line", () => {
+  it("formats a build line naming what reverted", () => {
     const clean = formatVerificationReport(
       reportVerification([archetype()], steps, slotRecords),
     );
-    expect(clean).toBe("0 verified, 1 never verified");
+    expect(clean).toBe(
+      [
+        "1 archetype never verified",
+        "0 archetypes verified against current structure",
+      ].join("\n"),
+    );
 
     const reverted = formatVerificationReport(
       reportVerification(
@@ -863,8 +936,14 @@ describe("reportVerification", () => {
         slotRecords,
       ),
     );
-    expect(reverted).toContain("1 archetype reverted to unverified");
-    expect(reverted).toContain("ARCH_FIXTURE");
+    expect(reverted).toBe(
+      [
+        "1 archetype reverted to unverified:",
+        "  ARCH_FIXTURE  (verified 2026-08-10, structure changed since)",
+        "0 archetypes never verified",
+        "0 archetypes verified against current structure",
+      ].join("\n"),
+    );
   });
 });
 

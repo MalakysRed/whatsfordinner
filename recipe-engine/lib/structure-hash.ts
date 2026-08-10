@@ -48,9 +48,11 @@ export function computeStructureHash(
       pattern_id: step.pattern_id ?? null,
       operates_on: step.operates_on,
       vessel_id: step.vessel_id,
-      // Both sorted: each is a *set* — of vessels, of slot slugs — so
-      // reordering one is not a cooking change and must not expire a
-      // verification. Changing its membership is, and does.
+      // Sorted canonically, per SPEC.md §3: both are *sets*, not sequences —
+      // a step that uses the protein and the fat uses both regardless of
+      // listing order — so reordering one must not read as a cooking change.
+      // Changing its membership is one, and does. `validate()` rejects
+      // duplicates in either list.
       merges_from: [...step.merges_from].sort(compareStrings),
       consumes_slots: [...step.consumes_slots].sort(compareStrings),
       is_optional: step.is_optional,

@@ -100,7 +100,8 @@ export type IssueCode =
   | "filter_incompatible"
   | "merge_without_prior_step"
   | "self_merge"
-  | "step_id_mismatch";
+  | "step_id_mismatch"
+  | "duplicate_set_member";
 
 export interface ValidationIssue {
   code: IssueCode;
@@ -323,6 +324,21 @@ export function validate(data: Dataset): ValidationIssue[] {
         field: "pattern_id",
         message: `pattern_id references unknown pattern ${step.pattern_id}`,
       });
+    }
+
+    // `consumes_slots` and `merges_from` are sets (SPEC.md §3) — they are
+    // sorted before hashing, so a duplicate is invisible to the hash and is
+    // simply an authoring mistake.
+    for (const field of ["consumes_slots", "merges_from"] as const) {
+      for (const duplicate of findDuplicates(step[field])) {
+        add({
+          code: "duplicate_set_member",
+          entity: "archetype_step",
+          id: step.id,
+          field,
+          message: `${field} lists "${duplicate}" more than once`,
+        });
+      }
     }
 
     for (const slug of step.consumes_slots) {
@@ -781,6 +797,17 @@ function collectDuplicates<T extends { id: string }>(
     }
     seen.add(record.id);
   }
+}
+
+/** Each value that appears more than once, reported once each. */
+function findDuplicates(values: string[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) duplicates.add(value);
+    seen.add(value);
+  }
+  return [...duplicates];
 }
 
 function optionalSet(ids: Iterable<string> | undefined): Set<string> | undefined {

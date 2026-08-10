@@ -119,24 +119,40 @@ export function reportVerification(
   return report;
 }
 
-/** One line for the build log, plus a named list when anything has reverted. */
+/**
+ * The build-log rendering, in the shape SPEC.md §3 specifies.
+ *
+ * It **names** the reverted archetypes rather than only counting them, and it
+ * does not claim a delta: nothing persists between builds, so "reverted since
+ * last build" is not computable without a committed manifest — and a state file
+ * that changes on every build buys git noise and merge conflicts for very
+ * little. Naming supplies what a delta would have. If you have just edited the
+ * curry and the curry is listed, the cause is obvious; a bare count teaches you
+ * to ignore it.
+ */
 export function formatVerificationReport(report: VerificationReport): string {
   const { verified, never_verified, reverted } = report;
+  const lines: string[] = [];
 
-  const headline =
-    reverted.length === 0
-      ? `${verified} verified, ${never_verified} never verified`
-      : `${reverted.length} ${plural(reverted.length, "archetype")} reverted to unverified ` +
-        `(${verified} still verified, ${never_verified} never verified)`;
+  if (reverted.length > 0) {
+    lines.push(
+      `${reverted.length} ${plural(reverted.length, "archetype")} reverted to unverified:`,
+    );
+    for (const archetype of reverted) {
+      const cooked =
+        archetype.verified_at === undefined
+          ? "structure changed since"
+          : `verified ${archetype.verified_at.slice(0, 10)}, structure changed since`;
+      lines.push(`  ${archetype.id}  (${cooked})`);
+    }
+  }
 
-  if (reverted.length === 0) return headline;
+  lines.push(`${never_verified} ${plural(never_verified, "archetype")} never verified`);
+  lines.push(
+    `${verified} ${plural(verified, "archetype")} verified against current structure`,
+  );
 
-  return [
-    headline,
-    ...reverted.map(
-      (a) => `  ${a.id} (${a.display_name}) — structure changed since it was cooked`,
-    ),
-  ].join("\n");
+  return lines.join("\n");
 }
 
 function plural(count: number, word: string): string {
