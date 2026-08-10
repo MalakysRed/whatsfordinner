@@ -62,10 +62,16 @@ CREATE TYPE ingredient_state AS ENUM (
 -- DERIVED, never authored or stored. Computed by comparing
 -- verified_structure_hash against the freshly computed structure_hash.
 -- See §3 Verification integrity.
+--
+-- Two values only. A 'community_verified' state was considered and
+-- deliberately left out: the cook log does not exist yet, and when it does,
+-- community verification will need a threshold, a cook count and a link
+-- between cook entries and archetype versions — more than a third branch
+-- in the derivation. A placeholder now would almost certainly be the wrong
+-- shape later, and an unreachable enum value invites incorrect wiring.
 CREATE TYPE verification_status AS ENUM (
-  'unverified',           -- authored from research, never cooked
-  'author_verified',      -- cooked by the author, result was right
-  'community_verified'    -- cook log cleared the confidence threshold
+  'unverified',           -- never cooked, or cooked against a structure since changed
+  'author_verified'       -- cooked by the author against the current structure
 );
 
 -- Strict by design. Adding a value should be a deliberate act meaning a
@@ -301,6 +307,7 @@ CREATE TABLE archetype (
   verified_structure_hash text,            -- structure_hash at time of verification
   verification_note   text,                -- what was wrong when it was cooked
   CHECK ((verified_at IS NULL) = (verified_structure_hash IS NULL)),
+  CHECK (verification_note IS NULL OR verified_at IS NOT NULL),
 
   default_servings    smallint NOT NULL DEFAULT 4,
   scalable            boolean NOT NULL DEFAULT true,
@@ -343,11 +350,26 @@ Reversion is therefore not enforced — it simply *is*. The derived value change
 - every slot's `role`, `cardinality`, `is_required` and `quantity_rule_id`
 - the archetype's `default_servings` and `scaling_limits`
 
+**Set fields are sorted before hashing.** `consumes_slots` and `merges_from` are sets, not sequences — a step that uses the protein and the fat uses both regardless of listing order. Sort them canonically before hashing so that reordering a list does not read as a cooking change. If addition order ever matters materially, that is two steps, not one ordered list, and this rule should be revisited. Validate that neither list contains duplicates.
+
+`verification_note` requires `verified_at` to be present: it records what happened when the dish was cooked. General uncertainty about an unverified archetype belongs in `authoring_notes`, which exists for exactly that.
+
 **Deliberately excluded:** `description`, `teaching_summary`, `authoring_notes`, `region_note`, `ui_prompt`, `display_name`, and any `impact_note` or `sensory_target` prose. Correcting a typo must not un-verify a dish cooked last week — if prose edits triggered reversion, the rule would be switched off within a fortnight for being tiresome, which is worse than not having it. **Do not widen this list.**
 
 **Also excluded, on a considered decision: `slot.accepts_filter`.** A verification attests that the *skeleton* is sound, not that every slot combination works — it never could, since nine slots with six options each is tens of thousands of permutations and exactly one was cooked. Widening a filter from poultry to poultry and red meat leaves the skeleton unchanged and the cooked version still correct. Slot *structure* is hashed because it changes the skeleton; the option list is not. The real risk here — a poorly suited option being added — belongs to `suitability`, `impact_note` and the cook log.
 
-**Reporting, not failing.** A reverted archetype is reported at build time (`2 archetypes reverted to unverified since last build`), not raised as an error. Editing an archetype is legitimate work, and failing the build for an expected consequence of legitimate work is the kind of rule that gets disabled.
+**Reporting, not failing.** Reverted archetypes are reported at build time, not raised as errors. Editing an archetype is legitimate work, and failing the build for its expected consequence is the kind of rule that gets disabled.
+
+**The report names the archetypes, and does not claim a delta.** Nothing persists between builds, so "reverted since last build" is not computable without a committed build manifest — and a state file that changes on every build buys git noise and merge conflicts for very little. Report what is computable, naming names:
+
+```
+1 archetype reverted to unverified:
+  ARCH_CURRY_NORTH_INDIAN  (verified 2026-08-12, structure changed since)
+14 archetypes never verified
+3 archetypes verified against current structure
+```
+
+Naming the archetype supplies what a delta would have: if you have just edited the curry and the curry is listed, the cause is obvious. A bare count teaches you to ignore it.
 
 ### `base_flavour_axes`
 
