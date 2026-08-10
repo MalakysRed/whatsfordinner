@@ -60,6 +60,15 @@ export const slugSchema = z
   .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/, "must be lowercase snake_case");
 
 /**
+ * The archetype's short code, 2–4 uppercase letters (SPEC.md §3). Step IDs are
+ * built from it, so the validator can confirm a step belongs to the archetype
+ * that claims it and that no two archetypes claim the same code.
+ */
+export const shortCodeSchema = z
+  .string()
+  .regex(/^[A-Z]{2,4}$/, "must be 2-4 uppercase letters");
+
+/**
  * Stream identifier, e.g. `main`, `tarka`. Chaining is validated within a
  * vessel rather than globally (SPEC.md §4).
  */
@@ -135,6 +144,29 @@ export const operatesOnSchema = z.enum([
   "slots",
   /** New fills joined to existing contents. No chain check. */
   "both",
+]);
+
+/**
+ * Closed by design (SPEC.md design rule 7). A step's `produces.state` and a
+ * technique's `accepts.states` draw only from this list, which makes vocabulary
+ * drift impossible rather than merely detectable — adding a value is a
+ * migration, not a convenience.
+ *
+ * Never overlaps with ingredient tags (design rule 8): a state is a temporary
+ * condition at one moment in the sequence, a tag is a permanent property of an
+ * ingredient.
+ */
+export const ingredientStateSchema = z.enum([
+  "raw",
+  "softened",
+  "browned",
+  "sealed",
+  "reduced",
+  "thickened",
+  "tender",
+  "combined",
+  "set",
+  "rested",
 ]);
 
 export const verificationStatusSchema = z.enum([
@@ -241,7 +273,7 @@ export const flavourDeltaSchema = z.object({
  */
 export const acceptsSchema = z.object({
   ingredient_tags: z.array(z.string()).default([]),
-  states: z.array(z.string()).default([]),
+  states: z.array(ingredientStateSchema).default([]),
   forms: z.array(z.string()).default([]),
   min_count: z.number().int().min(0).optional(),
 });
@@ -252,6 +284,12 @@ export const acceptsSchema = z.object({
  * Tag matching only — no query language, no DSL, no parser. `any_tags` is the
  * one required arm: it is what actually selects candidates, and a filter with
  * only exclusions would admit the entire ontology.
+ *
+ * **Tags only, never states** (design rule 8). A filter says *which
+ * ingredient*, never *what condition it is in* — `raw`, `sealed` and `tender`
+ * are states and belong nowhere near it. This is why compatibility checking
+ * compares tags alone: a filter carries no state information because it cannot
+ * meaningfully have any.
  */
 export const acceptsFilterSchema = z.object({
   /** Must carry at least one of these. */
@@ -279,7 +317,7 @@ export const producesColourSchema = z.enum([
  * technique can be written before its prose is settled.
  */
 export const producesSchema = z.object({
-  state: z.string().min(1),
+  state: ingredientStateSchema,
   colour: producesColourSchema.optional(),
   moisture: z.string().optional(),
   notes: z.string().optional(),
@@ -368,6 +406,7 @@ export type Typicality = z.infer<typeof typicalitySchema>;
 export type AuthoringStatus = z.infer<typeof authoringStatusSchema>;
 export type SlotCardinality = z.infer<typeof slotCardinalitySchema>;
 export type OperatesOn = z.infer<typeof operatesOnSchema>;
+export type IngredientState = z.infer<typeof ingredientStateSchema>;
 export type VerificationStatus = z.infer<typeof verificationStatusSchema>;
 export type DishClass = z.infer<typeof dishClassSchema>;
 export type AdaptationType = z.infer<typeof adaptationTypeSchema>;

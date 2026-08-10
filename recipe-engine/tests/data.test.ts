@@ -11,6 +11,7 @@ import {
   type ArchetypeInput,
   type ArchetypeStep,
   type ArchetypeStepInput,
+  type IngredientState,
   type Slot,
   type SlotInput,
   type SlotOption,
@@ -25,6 +26,7 @@ import {
   type Dataset,
   type ValidationIssue,
 } from "../lib/validate";
+import { computeStructureHash } from "../lib/structure-hash";
 
 import {
   archetypeSteps,
@@ -44,10 +46,13 @@ import {
  * against fixtures, so the checks are known to work *before* there is real data
  * relying on them.
  *
- * Fixture values are deliberately not culinary. States are `state_a`, vessels
- * are `fixture_vessel`, tags are `tag_a`. Nothing here should ever be mistaken
- * for an authored record, or harvested into one.
+ * Fixture values are deliberately not culinary: vessels are `fixture_vessel`,
+ * tags are `tag_a`, prose says "structural fixture". States are the exception —
+ * `ingredient_state` is a closed enum (design rule 7), so fixtures must draw
+ * from the real ten. Nothing here should be mistaken for an authored record.
  */
+
+const VERIFIED_AT = "2026-08-10T12:00:00Z";
 
 /* -------------------------------------------------------------------------- */
 /* Fixtures                                                                    */
@@ -62,7 +67,7 @@ function technique(overrides: Partial<TechniqueInput> = {}): Technique {
     definition_short: "Structural fixture.",
     definition_full: "Structural fixture used to exercise validation.",
     accepts: { states: [] },
-    produces: { state: "state_a" },
+    produces: { state: "softened" },
     heat: "medium",
     vessel_types: ["fixture_vessel"],
     duration_model: { base_seconds: 60 },
@@ -77,6 +82,7 @@ function archetype(overrides: Partial<ArchetypeInput> = {}): Archetype {
   return archetypeSchema.parse({
     id: "ARCH_FIXTURE",
     slug: "fixture",
+    short_code: "FIX",
     display_name: "Fixture archetype",
     dish_class: "stew",
     cuisine_ids: ["fixture_cuisine"],
@@ -137,6 +143,27 @@ function slotOption(overrides: Partial<SlotOptionInput> = {}): SlotOption {
   } satisfies SlotOptionInput);
 }
 
+/**
+ * An archetype marked verified against its own current structure, so the
+ * reversion check passes. The hash has to be computed from a parsed archetype,
+ * and the schema will not parse a verified one without a hash — so build it
+ * once with a placeholder, then rebuild with the real value.
+ */
+function verifiedArchetype(
+  steps: ArchetypeStep[],
+  slotRecords: Slot[],
+  overrides: Partial<ArchetypeInput> = {},
+): Archetype {
+  const base: Partial<ArchetypeInput> = {
+    verification_status: "author_verified",
+    verified_at: VERIFIED_AT,
+    verified_structure_hash: "placeholder",
+    ...overrides,
+  };
+  const hash = computeStructureHash(archetype(base), steps, slotRecords);
+  return archetype({ ...base, verified_structure_hash: hash });
+}
+
 function emptyDataset(overrides: Partial<Dataset> = {}): Dataset {
   return {
     techniques: [],
@@ -187,7 +214,7 @@ describe("authored data", () => {
     }
   });
 
-  it("passes referential and sequencing validation", () => {
+  it("passes referential, sequencing and verification validation", () => {
     expect(formatIssues(validate(dataset))).toBe("no issues");
   });
 });
@@ -207,11 +234,11 @@ describe("schemas", () => {
   });
 
   it("rejects a position-derived step ID", () => {
-    expect(archetypeStepSchema.safeParse({ ...step(), id: "STEP_NIC_4" }).success).toBe(
+    expect(archetypeStepSchema.safeParse({ ...step(), id: "STEP_FIX_4" }).success).toBe(
       false,
     );
     expect(
-      archetypeStepSchema.safeParse({ ...step(), id: "STEP_NIC_BLOOM_WHOLE_SPICE" })
+      archetypeStepSchema.safeParse({ ...step(), id: "STEP_FIX_BLOOM_WHOLE_SPICE" })
         .success,
     ).toBe(true);
   });
@@ -310,43 +337,17 @@ describe("schemas", () => {
     );
   });
 
-  it("defaults an archetype to draft and unverified", () => {
-    const parsed = archetype();
-    expect(parsed.status).toBe("draft");
-    expect(parsed.verification_status).toBe("unverified");
-  });
-
-  it("takes the three verification states and rejects anything else", () => {
-    for (const value of ["unverified", "author_verified", "community_verified"]) {
-      expect(
-        archetypeSchema.safeParse({ ...archetype(), verification_status: value })
-          .success,
-        value,
-      ).toBe(true);
-    }
-    expect(
-      archetypeSchema.safeParse({ ...archetype(), verification_status: "verified" })
-        .success,
-    ).toBe(false);
-  });
-
-  it("requires verified_at to be an ISO timestamp", () => {
-    expect(
-      archetypeSchema.safeParse({ ...archetype(), verified_at: "2026-08-10T12:00:00Z" })
-        .success,
-    ).toBe(true);
-    expect(
-      archetypeSchema.safeParse({ ...archetype(), verified_at: "last Tuesday" }).success,
-    ).toBe(false);
-  });
-
   it("uses the strict dish_class vocabulary from SPEC §0", () => {
-    expect(archetypeSchema.safeParse({ ...archetype(), dish_class: "traybake" }).success).toBe(
-      true,
-    );
-    // 'curry' is deliberately absent — it is a dish name, not a structure.
+    expect(
+      archetypeSchema.safeParse({ ...archetype(), dish_class: "traybake" }).success,
+    ).toBe(true);
+    // 'curry' is deliberately absent — a curry is dish_class 'braise', sharing
+    // its shape with a beef and ale stew. Curry is a name, not a structure.
     expect(archetypeSchema.safeParse({ ...archetype(), dish_class: "curry" }).success).toBe(
       false,
+    );
+    expect(archetypeSchema.safeParse({ ...archetype(), dish_class: "braise" }).success).toBe(
+      true,
     );
   });
 
@@ -381,6 +382,406 @@ describe("schemas", () => {
     expect(parsed.all_tags).toEqual([]);
     expect(parsed.exclude_tags).toEqual([]);
     expect(parsed.exclude_ids).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Schemas — the closed state vocabulary                                       */
+/* -------------------------------------------------------------------------- */
+
+describe("schemas: ingredient_state is closed", () => {
+  const STATES = [
+    "raw",
+    "softened",
+    "browned",
+    "sealed",
+    "reduced",
+    "thickened",
+    "tender",
+    "combined",
+    "set",
+    "rested",
+  ];
+
+  it("accepts every value in the enum", () => {
+    for (const state of STATES) {
+      expect(
+        techniqueSchema.safeParse({ ...technique(), produces: { state } }).success,
+        state,
+      ).toBe(true);
+    }
+  });
+
+  it("rejects an over-specific invented state", () => {
+    expect(
+      techniqueSchema.safeParse({
+        ...technique(),
+        produces: { state: "translucent_but_not_yet_golden" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a tag used where a state belongs", () => {
+    // 'fresh' and 'poultry' are tags. Design rule 8 keeps the namespaces apart.
+    expect(
+      techniqueSchema.safeParse({ ...technique(), accepts: { states: ["fresh"] } })
+        .success,
+    ).toBe(false);
+    expect(
+      techniqueSchema.safeParse({ ...technique(), produces: { state: "poultry" } })
+        .success,
+    ).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Schemas — identity and verification                                         */
+/* -------------------------------------------------------------------------- */
+
+describe("schemas: short_code", () => {
+  it("takes 2-4 uppercase letters and nothing else", () => {
+    for (const code of ["NI", "NIC", "NICX"]) {
+      expect(archetypeSchema.safeParse({ ...archetype(), short_code: code }).success, code).toBe(
+        true,
+      );
+    }
+    for (const code of ["N", "NICXY", "nic", "NI1", "NI_C"]) {
+      expect(archetypeSchema.safeParse({ ...archetype(), short_code: code }).success, code).toBe(
+        false,
+      );
+    }
+  });
+});
+
+describe("schemas: verification integrity", () => {
+  it("defaults an archetype to draft and unverified", () => {
+    const parsed = archetype();
+    expect(parsed.status).toBe("draft");
+    expect(parsed.verification_status).toBe("unverified");
+  });
+
+  it("requires verified_at and verified_structure_hash once verified", () => {
+    const verified = {
+      ...archetype(),
+      verification_status: "author_verified" as const,
+    };
+
+    expect(archetypeSchema.safeParse(verified).success).toBe(false);
+    expect(
+      archetypeSchema.safeParse({ ...verified, verified_at: VERIFIED_AT }).success,
+    ).toBe(false);
+    expect(
+      archetypeSchema.safeParse({ ...verified, verified_structure_hash: "abc" }).success,
+    ).toBe(false);
+    expect(
+      archetypeSchema.safeParse({
+        ...verified,
+        verified_at: VERIFIED_AT,
+        verified_structure_hash: "abc",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("requires neither while unverified", () => {
+    expect(archetypeSchema.safeParse(archetype()).success).toBe(true);
+  });
+
+  it("takes the three verification states and rejects anything else", () => {
+    for (const value of ["author_verified", "community_verified"]) {
+      expect(
+        archetypeSchema.safeParse({
+          ...archetype(),
+          verification_status: value,
+          verified_at: VERIFIED_AT,
+          verified_structure_hash: "abc",
+        }).success,
+        value,
+      ).toBe(true);
+    }
+    expect(
+      archetypeSchema.safeParse({ ...archetype(), verification_status: "verified" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("requires verified_at to be an ISO timestamp", () => {
+    expect(
+      archetypeSchema.safeParse({
+        ...archetype(),
+        verification_status: "author_verified",
+        verified_at: "last Tuesday",
+        verified_structure_hash: "abc",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* computeStructureHash                                                        */
+/* -------------------------------------------------------------------------- */
+
+describe("computeStructureHash", () => {
+  const steps = [step()];
+  const slotRecords = [slot()];
+  const baseline = computeStructureHash(archetype(), steps, slotRecords);
+
+  it("is deterministic", () => {
+    expect(computeStructureHash(archetype(), steps, slotRecords)).toBe(baseline);
+  });
+
+  it("ignores prose — a typo fix must not un-verify a dish", () => {
+    const proseEdits: Partial<ArchetypeInput>[] = [
+      { description: "Rewritten entirely." },
+      { teaching_summary: "Something new." },
+      { authoring_notes: "A caveat." },
+      { region_note: "A region." },
+      { display_name: "Renamed" },
+    ];
+
+    for (const edit of proseEdits) {
+      expect(
+        computeStructureHash(archetype(edit), steps, slotRecords),
+        JSON.stringify(edit),
+      ).toBe(baseline);
+    }
+
+    expect(
+      computeStructureHash(
+        archetype(),
+        [step({ sensory_target: "Completely different." , purpose: "Reworded." })],
+        slotRecords,
+      ),
+    ).toBe(baseline);
+
+    expect(
+      computeStructureHash(archetype(), steps, [
+        slot({ ui_prompt: "Reworded?", display_name: "Renamed" }),
+      ]),
+    ).toBe(baseline);
+  });
+
+  it("changes when the step sequence changes", () => {
+    const changes = [
+      [step({ operates_on: "both" })],
+      [step({ vessel_id: "tarka" })],
+      [step({ is_optional: true })],
+      [step({ heat_override: "high" })],
+      [step({ condition: { slot: "fixture_main", filled: true } })],
+      [step({ technique_id: "TECH_OTHER" })],
+    ];
+
+    for (const changed of changes) {
+      expect(
+        computeStructureHash(archetype(), changed, slotRecords),
+        JSON.stringify(changed[0].id),
+      ).not.toBe(baseline);
+    }
+  });
+
+  it("changes when step order changes", () => {
+    const reordered = [
+      step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_A" }),
+      step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_B" }),
+    ];
+    const swapped = [
+      step({ id: "STEP_FIX_ONE", position: 2, technique_id: "TECH_A" }),
+      step({ id: "STEP_FIX_TWO", position: 1, technique_id: "TECH_B" }),
+    ];
+    expect(computeStructureHash(archetype(), reordered, slotRecords)).not.toBe(
+      computeStructureHash(archetype(), swapped, slotRecords),
+    );
+  });
+
+  it("changes when a slot's structural fields change", () => {
+    for (const changed of [
+      slot({ role: "garnish" }),
+      slot({ cardinality: "one_to_many" }),
+      slot({ is_required: false }),
+      slot({ quantity_rule_id: "RULE_OTHER" }),
+    ]) {
+      expect(computeStructureHash(archetype(), steps, [changed])).not.toBe(baseline);
+    }
+  });
+
+  it("changes when servings or scaling limits change", () => {
+    expect(
+      computeStructureHash(archetype({ default_servings: 6 }), steps, slotRecords),
+    ).not.toBe(baseline);
+    expect(
+      computeStructureHash(
+        archetype({ scaling_limits: { min: 1, max: 8 } }),
+        steps,
+        slotRecords,
+      ),
+    ).not.toBe(baseline);
+  });
+
+  it("is unaffected by merges_from ordering", () => {
+    const a = [
+      step({ operates_on: "both", merges_from: ["tarka", "stock"] }),
+    ];
+    const b = [
+      step({ operates_on: "both", merges_from: ["stock", "tarka"] }),
+    ];
+    expect(computeStructureHash(archetype(), a, slotRecords)).toBe(
+      computeStructureHash(archetype(), b, slotRecords),
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* validate() — identity                                                       */
+/* -------------------------------------------------------------------------- */
+
+describe("validate: identity", () => {
+  it("catches two archetypes claiming the same short_code", () => {
+    const issues = validate(
+      emptyDataset({
+        archetypes: [
+          archetype(),
+          archetype({ id: "ARCH_OTHER", slug: "other", short_code: "FIX" }),
+        ],
+      }),
+    );
+    expect(codes(issues)).toContain("duplicate_short_code");
+  });
+
+  it("accepts distinct short codes", () => {
+    const issues = validate(
+      emptyDataset({
+        archetypes: [
+          archetype(),
+          archetype({ id: "ARCH_OTHER", slug: "other", short_code: "OTH" }),
+        ],
+      }),
+    );
+    expect(codes(issues)).not.toContain("duplicate_short_code");
+  });
+
+  it("catches a step ID carrying another archetype's short code", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [archetype()],
+        steps: [step({ id: "STEP_OTH_ALPHA" })],
+      }),
+    );
+    expect(codes(issues)).toContain("step_id_mismatch");
+    expect(formatIssues(issues)).toContain("STEP_FIX_");
+  });
+
+  it("catches a step ID with no slug after the short code", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [archetype()],
+        steps: [step({ id: "STEP_FIX" })],
+      }),
+    );
+    expect(codes(issues)).toContain("step_id_mismatch");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* validate() — verification                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe("validate: verification integrity", () => {
+  const steps = [step()];
+  const slotRecords = [slot()];
+
+  it("passes when the verified hash matches the current structure", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [verifiedArchetype(steps, slotRecords)],
+        steps,
+        slots: slotRecords,
+      }),
+    );
+    expect(formatIssues(issues)).toBe("no issues");
+  });
+
+  it("reverts verification when a cooking-relevant field changes", () => {
+    // Verified against the original steps, then a step is edited.
+    const verified = verifiedArchetype(steps, slotRecords);
+    const edited = [step({ operates_on: "both" })];
+
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [verified],
+        steps: edited,
+        slots: slotRecords,
+      }),
+    );
+
+    expect(codes(issues)).toContain("verification_reverted");
+    const message = formatIssues(issues);
+    expect(message).toContain("ARCH_FIXTURE");
+    expect(message).toContain("cook it again");
+  });
+
+  it("does not revert on a prose edit", () => {
+    const verified = verifiedArchetype(steps, slotRecords, {
+      description: "Original wording.",
+    });
+    const retyped = archetype({
+      verification_status: "author_verified",
+      verified_at: VERIFIED_AT,
+      verified_structure_hash: verified.verified_structure_hash,
+      description: "Corrected wording.",
+    });
+
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [retyped],
+        steps,
+        slots: slotRecords,
+      }),
+    );
+    expect(codes(issues)).not.toContain("verification_reverted");
+  });
+
+  it("does not check the hash of an unverified archetype", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [archetype()],
+        steps,
+        slots: slotRecords,
+      }),
+    );
+    expect(codes(issues)).not.toContain("verification_reverted");
+  });
+
+  it("catches a stored structure_hash that no longer matches", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [archetype({ structure_hash: "0".repeat(64) })],
+        steps,
+        slots: slotRecords,
+      }),
+    );
+    expect(codes(issues)).toContain("structure_hash_stale");
+  });
+
+  it("accepts a stored structure_hash that matches", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [
+          archetype({
+            structure_hash: computeStructureHash(archetype(), steps, slotRecords),
+          }),
+        ],
+        steps,
+        slots: slotRecords,
+      }),
+    );
+    expect(codes(issues)).not.toContain("structure_hash_stale");
   });
 });
 
@@ -430,9 +831,16 @@ describe("validate: referential integrity", () => {
     const issues = validate(
       emptyDataset({
         techniques: [technique()],
-        archetypes: [archetype(), archetype({ id: "ARCH_OTHER", slug: "other" })],
+        archetypes: [
+          archetype(),
+          archetype({ id: "ARCH_OTHER", slug: "other", short_code: "OTH" }),
+        ],
         steps: [
-          step({ archetype_id: "ARCH_OTHER", consumes_slots: ["fixture_main"] }),
+          step({
+            id: "STEP_OTH_ALPHA",
+            archetype_id: "ARCH_OTHER",
+            consumes_slots: ["fixture_main"],
+          }),
         ],
         slots: [slot()],
       }),
@@ -499,7 +907,7 @@ describe("validate: referential integrity", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("validate: vessels and merges", () => {
-  const boil = technique({ id: "TECH_BOIL", slug: "boil", produces: { state: "state_a" } });
+  const boil = technique({ id: "TECH_BOIL", slug: "boil", produces: { state: "softened" } });
 
   it("accepts a merge from a vessel with a prior step", () => {
     const issues = validate(
@@ -575,17 +983,37 @@ describe("validate: vessels and merges", () => {
     expect(codes(issues)).toContain("merge_without_prior_step");
   });
 
+  it("catches a step merging its own vessel into itself", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [boil],
+        archetypes: [archetype()],
+        steps: [
+          step({ id: "STEP_FIX_MAIN", position: 1, technique_id: "TECH_BOIL" }),
+          step({
+            id: "STEP_FIX_COMBINE",
+            position: 2,
+            technique_id: "TECH_BOIL",
+            operates_on: "both",
+            merges_from: ["main"],
+          }),
+        ],
+      }),
+    );
+    expect(codes(issues)).toContain("self_merge");
+  });
+
   it("does not chain steps across different vessels", () => {
     const producer = technique({
       id: "TECH_PRODUCER",
       slug: "producer",
-      produces: { state: "state_a" },
+      produces: { state: "softened" },
     });
     const consumer = technique({
       id: "TECH_CONSUMER",
       slug: "consumer",
-      accepts: { states: ["state_b"] },
-      produces: { state: "state_c" },
+      accepts: { states: ["browned"] },
+      produces: { state: "reduced" },
     });
 
     const issues = validate(
@@ -594,7 +1022,6 @@ describe("validate: vessels and merges", () => {
         archetypes: [archetype()],
         steps: [
           step({ id: "STEP_FIX_MAIN", position: 1, technique_id: "TECH_PRODUCER" }),
-          // Different vessel, so STEP_FIX_MAIN is not its predecessor.
           step({
             id: "STEP_FIX_TARKA",
             position: 2,
@@ -616,11 +1043,14 @@ describe("validate: produces satisfies accepts", () => {
   const producer = technique({
     id: "TECH_PRODUCER",
     slug: "producer",
-    produces: { state: "state_softened" },
+    produces: { state: "softened" },
     accepts: { states: [] },
   });
 
-  function consumer(states: string[], produces = "state_done"): Technique {
+  function consumer(
+    states: IngredientState[],
+    produces: IngredientState = "combined",
+  ): Technique {
     return technique({
       id: "TECH_CONSUMER",
       slug: "consumer",
@@ -629,20 +1059,16 @@ describe("validate: produces satisfies accepts", () => {
     });
   }
 
-  function chain(...steps: ArchetypeStep[]): Dataset {
-    return emptyDataset({
-      techniques: [producer, consumer(["state_softened"])],
-      archetypes: [archetype()],
-      steps,
-    });
-  }
-
   it("passes when the next step accepts the produced state", () => {
     const issues = validate(
-      chain(
-        step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-        step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
-      ),
+      emptyDataset({
+        techniques: [producer, consumer(["softened"])],
+        archetypes: [archetype()],
+        steps: [
+          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
+        ],
+      }),
     );
     expect(formatIssues(issues)).toBe("no issues");
   });
@@ -650,7 +1076,7 @@ describe("validate: produces satisfies accepts", () => {
   it("fails when the next step does not accept the produced state", () => {
     const issues = validate(
       emptyDataset({
-        techniques: [producer, consumer(["state_raw"])],
+        techniques: [producer, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
           step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
@@ -659,7 +1085,7 @@ describe("validate: produces satisfies accepts", () => {
       }),
     );
     expect(codes(issues)).toEqual(["sequencing_mismatch"]);
-    expect(formatIssues(issues)).toContain("state_softened");
+    expect(formatIssues(issues)).toContain("softened");
   });
 
   it("treats an empty accepts.states as unconstrained", () => {
@@ -681,7 +1107,7 @@ describe("validate: produces satisfies accepts", () => {
     // state mismatch. Under the pre-operates_on rule this failed validation.
     const issues = validate(
       emptyDataset({
-        techniques: [producer, consumer(["state_raw"])],
+        techniques: [producer, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
           step({ id: "STEP_FIX_REDUCE", position: 1, technique_id: "TECH_PRODUCER" }),
@@ -700,7 +1126,7 @@ describe("validate: produces satisfies accepts", () => {
   it("exempts a 'both' step as a target", () => {
     const issues = validate(
       emptyDataset({
-        techniques: [producer, consumer(["state_raw"])],
+        techniques: [producer, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
           step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
@@ -717,18 +1143,16 @@ describe("validate: produces satisfies accepts", () => {
   });
 
   it("walks past an optional step, which generation may skip", () => {
-    // STEP_TWO is optional, so STEP_ONE's output can reach STEP_THREE directly.
-    // STEP_TWO accepts the produced state but STEP_THREE does not.
     const optional = technique({
       id: "TECH_OPTIONAL",
       slug: "optional",
-      accepts: { states: ["state_softened"] },
-      produces: { state: "state_softened" },
+      accepts: { states: ["softened"] },
+      produces: { state: "softened" },
     });
 
     const issues = validate(
       emptyDataset({
-        techniques: [producer, optional, consumer(["state_raw"])],
+        techniques: [producer, optional, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
           step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
@@ -747,16 +1171,16 @@ describe("validate: produces satisfies accepts", () => {
   });
 
   it("stops the backward walk at the first mandatory predecessor", () => {
-    // STEP_ONE is mandatory, so STEP_THREE can never see anything before it.
+    // STEP_FIX_ONE is mandatory, so STEP_FIX_THREE never sees STEP_FIX_ZERO.
     const unreachable = technique({
       id: "TECH_UNREACHABLE",
       slug: "unreachable",
-      produces: { state: "state_never_seen" },
+      produces: { state: "set" },
     });
 
     const issues = validate(
       emptyDataset({
-        techniques: [unreachable, producer, consumer(["state_softened"])],
+        techniques: [unreachable, producer, consumer(["softened"])],
         archetypes: [archetype()],
         steps: [
           step({ id: "STEP_FIX_ZERO", position: 1, technique_id: "TECH_UNREACHABLE" }),
@@ -765,17 +1189,19 @@ describe("validate: produces satisfies accepts", () => {
         ],
       }),
     );
-    expect(formatIssues(issues)).not.toContain("state_never_seen");
+    expect(formatIssues(issues)).toBe("no issues");
   });
 
   it("treats a 'slots' step as transparent when walking backwards", () => {
-    // STEP_TWO acts only on new fills, so STEP_THREE's predecessor is STEP_ONE.
+    // Confirmed in SPEC §7: a step that only introduces new fills leaves the
+    // accumulated contents as the last vessel/both step left them, so it is
+    // skipped and never stops the walk — mandatory or not.
     const issues = validate(
       emptyDataset({
         techniques: [
           producer,
           technique({ id: "TECH_SLOTS", slug: "slots_only", accepts: { states: [] } }),
-          consumer(["state_softened"]),
+          consumer(["softened"]),
         ],
         archetypes: [archetype()],
         steps: [
@@ -795,10 +1221,14 @@ describe("validate: produces satisfies accepts", () => {
 
   it("orders by position, not by declaration order", () => {
     const issues = validate(
-      chain(
-        step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
-        step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-      ),
+      emptyDataset({
+        techniques: [producer, consumer(["softened"])],
+        archetypes: [archetype()],
+        steps: [
+          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
+          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
+        ],
+      }),
     );
     expect(issues).toEqual([]);
   });
@@ -835,6 +1265,34 @@ describe("validate: produces satisfies accepts", () => {
       }),
     );
     expect(codes(issues)).toContain("cannot_follow_violation");
+  });
+
+  it("does not apply cannot_follow to a 'slots' target", () => {
+    // Scoped to vessel targets only: condition-based constraints are already
+    // covered by produces/accepts with a clearer message.
+    const follower = technique({
+      id: "TECH_CONSUMER",
+      slug: "consumer",
+      accepts: { states: [] },
+      cannot_follow: ["TECH_PRODUCER"],
+    });
+
+    const issues = validate(
+      emptyDataset({
+        techniques: [producer, follower],
+        archetypes: [archetype()],
+        steps: [
+          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({
+            id: "STEP_FIX_TWO",
+            position: 2,
+            technique_id: "TECH_CONSUMER",
+            operates_on: "slots",
+          }),
+        ],
+      }),
+    );
+    expect(codes(issues)).not.toContain("cannot_follow_violation");
   });
 });
 

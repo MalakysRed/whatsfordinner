@@ -8,6 +8,7 @@ import type {
   SlotOption,
   Technique,
 } from "../schemas";
+import { computeStructureHash } from "./structure-hash";
 
 /**
  * Referential and step-sequencing checks over the authored data layer.
@@ -20,7 +21,9 @@ import type {
  *
  * Implemented: SPEC.md §7's referential group, the per-vessel `produces` →
  * `accepts` walk, `cannot_follow`, the `accepts_filter` compatibility check for
- * `slots`/`both` steps, and `merges_from` resolution.
+ * `slots`/`both` steps, `merges_from` resolution including self-merge, the
+ * identity checks (`short_code` uniqueness and step-ID ownership), and the
+ * verification-integrity checks including automatic reversion.
  *
  * Deliberately not implemented, per SPEC.md §7:
  *   - Condition-aware skip combinations. The walk treats every skip as
@@ -80,12 +83,17 @@ export type EntityKind =
 export type IssueCode =
   | "duplicate_id"
   | "duplicate_position"
+  | "duplicate_short_code"
   | "unresolved_reference"
   | "reference_wrong_owner"
   | "sequencing_mismatch"
   | "cannot_follow_violation"
   | "filter_incompatible"
-  | "merge_without_prior_step";
+  | "merge_without_prior_step"
+  | "self_merge"
+  | "step_id_mismatch"
+  | "structure_hash_stale"
+  | "verification_reverted";
 
 export interface ValidationIssue {
   code: IssueCode;
@@ -336,12 +344,127 @@ export function validate(data: Dataset): ValidationIssue[] {
     }
   }
 
-  /* ---- vessels, sequencing and slot filters ------------------------------- */
+  /* ---- identity, vessels, sequencing and verification ---------------------- */
+  issues.push(...checkIdentity(data, archetypeById));
   issues.push(...checkMerges(data));
   issues.push(...checkSlotFilters(data, techniqueById, slotByLocalRef));
   issues.push(...checkSequencing(data, techniqueById, patternById));
+  issues.push(...checkVerification(data));
 
   return issues;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Identity                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * SPEC.md §7's identity checks: `short_code` is unique across archetypes, and
+ * every step ID is built from its *own* archetype's short code.
+ *
+ * Only the `STEP_<short_code>_` prefix is checkable — `archetype_step` has no
+ * `slug` column, so the trailing segment is a free descriptive name with
+ * nothing to compare it against beyond being non-empty.
+ */
+function checkIdentity(
+  data: Dataset,
+  archetypeById: Map<string, Archetype>,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  const seenShortCodes = new Map<string, string>();
+  for (const archetype of data.archetypes) {
+    const first = seenShortCodes.get(archetype.short_code);
+    if (first !== undefined) {
+      issues.push({
+        code: "duplicate_short_code",
+        entity: "archetype",
+        id: archetype.id,
+        field: "short_code",
+        message: `short_code "${archetype.short_code}" is already claimed by archetype ${first}`,
+      });
+    } else {
+      seenShortCodes.set(archetype.short_code, archetype.id);
+    }
+  }
+
+  for (const step of data.steps) {
+    const archetype = archetypeById.get(step.archetype_id);
+    // Unresolved archetype is already reported as a reference issue.
+    if (!archetype) continue;
+
+    const expected = `STEP_${archetype.short_code}_`;
+    if (!step.id.startsWith(expected) || step.id.length <= expected.length) {
+      issues.push({
+        code: "step_id_mismatch",
+        entity: "archetype_step",
+        id: step.id,
+        field: "id",
+        message: `step ID must start with "${expected}" — archetype ${archetype.id} has short_code "${archetype.short_code}"`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Verification integrity                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * SPEC.md §3. A verification records that a *specific version* of the archetype
+ * was cooked and came out right, so it must expire when that version changes.
+ *
+ * Two checks. A stored `structure_hash` that disagrees with the recomputed one
+ * is stale bookkeeping. And when the current structure no longer matches
+ * `verified_structure_hash`, the archetype has reverted to unverified and must
+ * be cooked again — a build failure, not a warning, and not overridable.
+ *
+ * The presence rules for `verified_at` and `verified_structure_hash` are
+ * enforced in `archetypeSchema` rather than here, mirroring the SQL CHECKs.
+ */
+function checkVerification(data: Dataset): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const archetype of data.archetypes) {
+    const computed = computeStructureHash(archetype, data.steps, data.slots);
+
+    if (
+      archetype.structure_hash !== undefined &&
+      archetype.structure_hash !== computed
+    ) {
+      issues.push({
+        code: "structure_hash_stale",
+        entity: "archetype",
+        id: archetype.id,
+        field: "structure_hash",
+        message: `stored structure_hash ${short(archetype.structure_hash)} does not match the recomputed ${short(computed)} — regenerate it`,
+      });
+    }
+
+    if (archetype.verification_status === "unverified") continue;
+
+    if (archetype.verified_structure_hash !== computed) {
+      issues.push({
+        code: "verification_reverted",
+        entity: "archetype",
+        id: archetype.id,
+        field: "verification_status",
+        message:
+          `${archetype.id} (${archetype.display_name}) was verified against structure ` +
+          `${short(archetype.verified_structure_hash ?? "none")}, but its cooking-relevant ` +
+          `fields now hash to ${short(computed)}. The verification no longer applies: ` +
+          `set verification_status back to 'unverified' and cook it again.`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+function short(hash: string): string {
+  return hash.length > 12 ? `${hash.slice(0, 12)}…` : hash;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -378,6 +501,19 @@ function checkMerges(data: Dataset): ValidationIssue[] {
     const vessels = earliestByVessel.get(step.archetype_id);
 
     for (const vessel of step.merges_from) {
+      // A step merging its own stream into itself is an authoring error that
+      // would otherwise pass: the vessel trivially exists and has prior steps.
+      if (vessel === step.vessel_id) {
+        issues.push({
+          code: "self_merge",
+          entity: "archetype_step",
+          id: step.id,
+          field: "merges_from",
+          message: `merges_from lists this step's own vessel "${vessel}"`,
+        });
+        continue;
+      }
+
       const earliest = vessels?.get(vessel);
       if (earliest === undefined) {
         issues.push({
@@ -412,11 +548,16 @@ function checkMerges(data: Dataset): ValidationIssue[] {
  * that admits an ingredient the technique cannot take is an authoring error,
  * caught at build time rather than at generation time.
  *
- * There is no ingredient ontology yet, so this reasons over tags alone rather
- * than enumerating ingredients. Only `ingredient_tags` is compared: a filter
- * carries no state or form information, and `accepts.states` / `accepts.forms`
- * draw on a different vocabulary — the spec's own example has `raw` as both a
- * tag and a state, which is exactly the conflation to avoid.
+ * Tags alone are compared, and that is correct rather than a limitation to be
+ * fixed later. Per design rule 8, tags and states are separate namespaces: a
+ * filter says *which ingredient*, never *what condition it is in*. It carries
+ * no state or form information because it cannot meaningfully have any —
+ * condition depends on where a step sits in the sequence, not on the
+ * ingredient. So `accepts.states` and `accepts.forms` are deliberately not
+ * cross-checked against a filter.
+ *
+ * There is also no ingredient ontology yet, so this reasons over the tag
+ * guarantee rather than enumerating ingredients.
  */
 function checkSlotFilters(
   data: Dataset,
