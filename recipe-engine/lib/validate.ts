@@ -8,7 +8,6 @@ import type {
   SlotOption,
   Technique,
 } from "../schemas";
-import { computeStructureHash } from "./structure-hash";
 
 /**
  * Referential and step-sequencing checks over the authored data layer.
@@ -21,9 +20,18 @@ import { computeStructureHash } from "./structure-hash";
  *
  * Implemented: SPEC.md §7's referential group, the per-vessel `produces` →
  * `accepts` walk, `cannot_follow`, the `accepts_filter` compatibility check for
- * `slots`/`both` steps, `merges_from` resolution including self-merge, the
- * identity checks (`short_code` uniqueness and step-ID ownership), and the
- * verification-integrity checks including automatic reversion.
+ * `slots`/`both` steps, `merges_from` resolution including self-merge, and the
+ * identity checks (`short_code` uniqueness, step-slug uniqueness, and exact
+ * step-ID composition).
+ *
+ * Verification is deliberately absent from this module. `verification_status`
+ * is derived rather than authored, so there is no authored input to validate
+ * and nothing to reject; reversion is reported at build time by
+ * `reportVerification` in `lib/verification.ts`, not raised as an error.
+ * Editing an archetype is legitimate work, and failing the build for its
+ * expected consequence is the kind of rule that gets switched off. The one
+ * surviving rule — `verified_at` and `verified_structure_hash` both present or
+ * both absent — lives in `archetypeSchema`, mirroring the SQL CHECK.
  *
  * Deliberately not implemented, per SPEC.md §7:
  *   - Condition-aware skip combinations. The walk treats every skip as
@@ -84,6 +92,7 @@ export type IssueCode =
   | "duplicate_id"
   | "duplicate_position"
   | "duplicate_short_code"
+  | "duplicate_step_slug"
   | "unresolved_reference"
   | "reference_wrong_owner"
   | "sequencing_mismatch"
@@ -91,9 +100,7 @@ export type IssueCode =
   | "filter_incompatible"
   | "merge_without_prior_step"
   | "self_merge"
-  | "step_id_mismatch"
-  | "structure_hash_stale"
-  | "verification_reverted";
+  | "step_id_mismatch";
 
 export interface ValidationIssue {
   code: IssueCode;
@@ -349,7 +356,6 @@ export function validate(data: Dataset): ValidationIssue[] {
   issues.push(...checkMerges(data));
   issues.push(...checkSlotFilters(data, techniqueById, slotByLocalRef));
   issues.push(...checkSequencing(data, techniqueById, patternById));
-  issues.push(...checkVerification(data));
 
   return issues;
 }
@@ -359,12 +365,12 @@ export function validate(data: Dataset): ValidationIssue[] {
 /* -------------------------------------------------------------------------- */
 
 /**
- * SPEC.md §7's identity checks: `short_code` is unique across archetypes, and
- * every step ID is built from its *own* archetype's short code.
+ * SPEC.md §7's identity checks: `short_code` is unique across archetypes, every
+ * step `slug` is unique within its archetype, and every step ID equals
+ * `STEP_` + its own archetype's `short_code` + its own `slug`.
  *
- * Only the `STEP_<short_code>_` prefix is checkable — `archetype_step` has no
- * `slug` column, so the trailing segment is a free descriptive name with
- * nothing to compare it against beyond being non-empty.
+ * Both components are stored fields, so the ID is verified exactly rather than
+ * only prefix checked.
  */
 function checkIdentity(
   data: Dataset,
@@ -388,83 +394,39 @@ function checkIdentity(
     }
   }
 
+  const seenSlugs = new Map<string, string>();
   for (const step of data.steps) {
+    const key = localRef(step.archetype_id, step.slug);
+    const first = seenSlugs.get(key);
+    if (first !== undefined) {
+      issues.push({
+        code: "duplicate_step_slug",
+        entity: "archetype_step",
+        id: step.id,
+        field: "slug",
+        message: `slug "${step.slug}" is already used by step ${first} on archetype ${step.archetype_id}`,
+      });
+    } else {
+      seenSlugs.set(key, step.id);
+    }
+
     const archetype = archetypeById.get(step.archetype_id);
     // Unresolved archetype is already reported as a reference issue.
     if (!archetype) continue;
 
-    const expected = `STEP_${archetype.short_code}_`;
-    if (!step.id.startsWith(expected) || step.id.length <= expected.length) {
+    const expected = `STEP_${archetype.short_code}_${step.slug.toUpperCase()}`;
+    if (step.id !== expected) {
       issues.push({
         code: "step_id_mismatch",
         entity: "archetype_step",
         id: step.id,
         field: "id",
-        message: `step ID must start with "${expected}" — archetype ${archetype.id} has short_code "${archetype.short_code}"`,
+        message: `step ID must be "${expected}" — archetype ${archetype.id} has short_code "${archetype.short_code}" and this step's slug is "${step.slug}"`,
       });
     }
   }
 
   return issues;
-}
-
-/* -------------------------------------------------------------------------- */
-/* Verification integrity                                                      */
-/* -------------------------------------------------------------------------- */
-
-/**
- * SPEC.md §3. A verification records that a *specific version* of the archetype
- * was cooked and came out right, so it must expire when that version changes.
- *
- * Two checks. A stored `structure_hash` that disagrees with the recomputed one
- * is stale bookkeeping. And when the current structure no longer matches
- * `verified_structure_hash`, the archetype has reverted to unverified and must
- * be cooked again — a build failure, not a warning, and not overridable.
- *
- * The presence rules for `verified_at` and `verified_structure_hash` are
- * enforced in `archetypeSchema` rather than here, mirroring the SQL CHECKs.
- */
-function checkVerification(data: Dataset): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  for (const archetype of data.archetypes) {
-    const computed = computeStructureHash(archetype, data.steps, data.slots);
-
-    if (
-      archetype.structure_hash !== undefined &&
-      archetype.structure_hash !== computed
-    ) {
-      issues.push({
-        code: "structure_hash_stale",
-        entity: "archetype",
-        id: archetype.id,
-        field: "structure_hash",
-        message: `stored structure_hash ${short(archetype.structure_hash)} does not match the recomputed ${short(computed)} — regenerate it`,
-      });
-    }
-
-    if (archetype.verification_status === "unverified") continue;
-
-    if (archetype.verified_structure_hash !== computed) {
-      issues.push({
-        code: "verification_reverted",
-        entity: "archetype",
-        id: archetype.id,
-        field: "verification_status",
-        message:
-          `${archetype.id} (${archetype.display_name}) was verified against structure ` +
-          `${short(archetype.verified_structure_hash ?? "none")}, but its cooking-relevant ` +
-          `fields now hash to ${short(computed)}. The verification no longer applies: ` +
-          `set verification_status back to 'unverified' and cook it again.`,
-      });
-    }
-  }
-
-  return issues;
-}
-
-function short(hash: string): string {
-  return hash.length > 12 ? `${hash.slice(0, 12)}…` : hash;
 }
 
 /* -------------------------------------------------------------------------- */

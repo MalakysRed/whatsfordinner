@@ -32,6 +32,12 @@ export const archetypeStepSchema = z
   .object({
     id: stepIdSchema,
     archetype_id: archetypeIdSchema,
+    /**
+     * Unique within the archetype. Together with the archetype's `short_code`
+     * this composes `id` — `STEP_` + `NIC` + `BLOOM_WHOLE_SPICE` — so the ID is
+     * fully verifiable rather than only prefix checked.
+     */
+    slug: slugSchema,
     /** 1-based. `UNIQUE (archetype_id, position)` is checked in `validate.ts`. */
     position: z.number().int().min(1),
 

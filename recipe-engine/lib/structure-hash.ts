@@ -10,16 +10,26 @@ import type { Archetype, ArchetypeStep, Slot } from "../schemas";
  * so the hash covers the cooking-relevant fields and nothing else.
  *
  * Included: the ordered step sequence (`technique_id`, `pattern_id`,
- * `operates_on`, `vessel_id`, `merges_from`, `is_optional`, `condition` and the
- * three overrides), every slot's `role`, `cardinality`, `is_required` and
- * `quantity_rule_id`, and the archetype's `default_servings` and
- * `scaling_limits`.
+ * `operates_on`, `vessel_id`, `merges_from`, `consumes_slots`, `is_optional`,
+ * `condition` and the three overrides), every slot's `role`, `cardinality`,
+ * `is_required` and `quantity_rule_id`, and the archetype's `default_servings`
+ * and `scaling_limits`.
  *
- * Deliberately excluded: all prose — `description`, `teaching_summary`,
- * `authoring_notes`, `region_note`, `ui_prompt`, `display_name`, `impact_note`,
- * `sensory_target`. Correcting a typo must not un-verify a dish cooked last
- * week; if prose edits triggered reversion the rule would be switched off
- * within a fortnight for being tiresome, which is worse than not having it.
+ * Deliberately excluded, and **not to be widened**: all prose —
+ * `description`, `teaching_summary`, `authoring_notes`, `region_note`,
+ * `ui_prompt`, `display_name`, `impact_note`, `sensory_target`. Correcting a
+ * typo must not un-verify a dish cooked last week; if prose edits triggered
+ * reversion the rule would be switched off within a fortnight for being
+ * tiresome, which is worse than not having it.
+ *
+ * Also excluded on a considered decision: `slot.accepts_filter`. A verification
+ * attests the *skeleton* is sound, not that every slot combination works — it
+ * never could, since nine slots with six options each is tens of thousands of
+ * permutations and exactly one was cooked. Slot *structure* is hashed because
+ * it changes the skeleton; the option list is not.
+ *
+ * The result is never stored on the record — it is derivable at any moment, so
+ * storing it would violate design rule 3. Compute it here and at build time.
  *
  * Uses `node:crypto`, which is stdlib rather than a new dependency. The engine
  * is a build-time data layer and nothing in the app imports it.
@@ -38,9 +48,11 @@ export function computeStructureHash(
       pattern_id: step.pattern_id ?? null,
       operates_on: step.operates_on,
       vessel_id: step.vessel_id,
-      // Sorted: `merges_from` is a set of vessels, so reordering it is not a
-      // cooking change and should not expire a verification.
+      // Both sorted: each is a *set* — of vessels, of slot slugs — so
+      // reordering one is not a cooking change and must not expire a
+      // verification. Changing its membership is, and does.
       merges_from: [...step.merges_from].sort(compareStrings),
+      consumes_slots: [...step.consumes_slots].sort(compareStrings),
       is_optional: step.is_optional,
       condition: step.condition ?? null,
       heat_override: step.heat_override ?? null,

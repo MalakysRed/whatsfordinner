@@ -27,6 +27,11 @@ import {
   type ValidationIssue,
 } from "../lib/validate";
 import { computeStructureHash } from "../lib/structure-hash";
+import {
+  deriveVerificationStatus,
+  formatVerificationReport,
+  reportVerification,
+} from "../lib/verification";
 
 import {
   archetypeSteps,
@@ -101,10 +106,16 @@ function archetype(overrides: Partial<ArchetypeInput> = {}): Archetype {
   } satisfies ArchetypeInput);
 }
 
+/**
+ * The ID is derived from the slug so fixtures satisfy the composition rule by
+ * construction; pass `id` explicitly to break it deliberately.
+ */
 function step(overrides: Partial<ArchetypeStepInput> = {}): ArchetypeStep {
+  const slug = overrides.slug ?? "alpha";
   return archetypeStepSchema.parse({
-    id: "STEP_FIX_ALPHA",
+    id: `STEP_FIX_${slug.toUpperCase()}`,
     archetype_id: "ARCH_FIXTURE",
+    slug,
     position: 1,
     technique_id: "TECH_FIXTURE_A",
     purpose: "Structural fixture.",
@@ -144,10 +155,10 @@ function slotOption(overrides: Partial<SlotOptionInput> = {}): SlotOption {
 }
 
 /**
- * An archetype marked verified against its own current structure, so the
- * reversion check passes. The hash has to be computed from a parsed archetype,
- * and the schema will not parse a verified one without a hash — so build it
- * once with a placeholder, then rebuild with the real value.
+ * An archetype whose recorded verification matches its current structure, so
+ * `deriveVerificationStatus` reports `author_verified`. The hash must be
+ * computed from a parsed archetype, and the schema will not accept a hash
+ * without a date — so build once with a placeholder, then rebuild for real.
  */
 function verifiedArchetype(
   steps: ArchetypeStep[],
@@ -155,7 +166,6 @@ function verifiedArchetype(
   overrides: Partial<ArchetypeInput> = {},
 ): Archetype {
   const base: Partial<ArchetypeInput> = {
-    verification_status: "author_verified",
     verified_at: VERIFIED_AT,
     verified_structure_hash: "placeholder",
     ...overrides,
@@ -214,7 +224,7 @@ describe("authored data", () => {
     }
   });
 
-  it("passes referential, sequencing and verification validation", () => {
+  it("passes referential, sequencing and identity validation", () => {
     expect(formatIssues(validate(dataset))).toBe("no issues");
   });
 });
@@ -454,61 +464,44 @@ describe("schemas: short_code", () => {
 });
 
 describe("schemas: verification integrity", () => {
-  it("defaults an archetype to draft and unverified", () => {
-    const parsed = archetype();
-    expect(parsed.status).toBe("draft");
-    expect(parsed.verification_status).toBe("unverified");
+  it("does not carry verification_status — it is derived", () => {
+    expect("verification_status" in archetype()).toBe(false);
   });
 
-  it("requires verified_at and verified_structure_hash once verified", () => {
-    const verified = {
-      ...archetype(),
-      verification_status: "author_verified" as const,
-    };
+  it("does not carry structure_hash — it is computed, never stored", () => {
+    expect("structure_hash" in archetype()).toBe(false);
+  });
 
-    expect(archetypeSchema.safeParse(verified).success).toBe(false);
+  it("defaults an archetype to draft", () => {
+    expect(archetype().status).toBe("draft");
+  });
+
+  it("requires verified_at and verified_structure_hash both or neither", () => {
+    // Neither: never cooked.
+    expect(archetypeSchema.safeParse(archetype()).success).toBe(true);
+
+    // Half a verification record is not a verification.
     expect(
-      archetypeSchema.safeParse({ ...verified, verified_at: VERIFIED_AT }).success,
+      archetypeSchema.safeParse({ ...archetype(), verified_at: VERIFIED_AT }).success,
     ).toBe(false);
     expect(
-      archetypeSchema.safeParse({ ...verified, verified_structure_hash: "abc" }).success,
+      archetypeSchema.safeParse({ ...archetype(), verified_structure_hash: "abc" })
+        .success,
     ).toBe(false);
+
     expect(
       archetypeSchema.safeParse({
-        ...verified,
+        ...archetype(),
         verified_at: VERIFIED_AT,
         verified_structure_hash: "abc",
       }).success,
     ).toBe(true);
   });
 
-  it("requires neither while unverified", () => {
-    expect(archetypeSchema.safeParse(archetype()).success).toBe(true);
-  });
-
-  it("takes the three verification states and rejects anything else", () => {
-    for (const value of ["author_verified", "community_verified"]) {
-      expect(
-        archetypeSchema.safeParse({
-          ...archetype(),
-          verification_status: value,
-          verified_at: VERIFIED_AT,
-          verified_structure_hash: "abc",
-        }).success,
-        value,
-      ).toBe(true);
-    }
-    expect(
-      archetypeSchema.safeParse({ ...archetype(), verification_status: "verified" })
-        .success,
-    ).toBe(false);
-  });
-
   it("requires verified_at to be an ISO timestamp", () => {
     expect(
       archetypeSchema.safeParse({
         ...archetype(),
-        verification_status: "author_verified",
         verified_at: "last Tuesday",
         verified_structure_hash: "abc",
       }).success,
@@ -580,12 +573,12 @@ describe("computeStructureHash", () => {
 
   it("changes when step order changes", () => {
     const reordered = [
-      step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_A" }),
-      step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_B" }),
+      step({ slug: "one", position: 1, technique_id: "TECH_A" }),
+      step({ slug: "two", position: 2, technique_id: "TECH_B" }),
     ];
     const swapped = [
-      step({ id: "STEP_FIX_ONE", position: 2, technique_id: "TECH_A" }),
-      step({ id: "STEP_FIX_TWO", position: 1, technique_id: "TECH_B" }),
+      step({ slug: "one", position: 2, technique_id: "TECH_A" }),
+      step({ slug: "two", position: 1, technique_id: "TECH_B" }),
     ];
     expect(computeStructureHash(archetype(), reordered, slotRecords)).not.toBe(
       computeStructureHash(archetype(), swapped, slotRecords),
@@ -614,6 +607,41 @@ describe("computeStructureHash", () => {
         slotRecords,
       ),
     ).not.toBe(baseline);
+  });
+
+  it("changes when consumes_slots membership changes", () => {
+    // A step consuming hero_protein instead of souring_agent is a different
+    // dish, so the verification must expire.
+    expect(
+      computeStructureHash(archetype(), [step({ consumes_slots: ["fixture_main"] })], slotRecords),
+    ).not.toBe(baseline);
+  });
+
+  it("is unaffected by consumes_slots ordering", () => {
+    expect(
+      computeStructureHash(
+        archetype(),
+        [step({ consumes_slots: ["a_slot", "b_slot"] })],
+        slotRecords,
+      ),
+    ).toBe(
+      computeStructureHash(
+        archetype(),
+        [step({ consumes_slots: ["b_slot", "a_slot"] })],
+        slotRecords,
+      ),
+    );
+  });
+
+  it("ignores slot.accepts_filter — a considered exclusion", () => {
+    // A verification attests the skeleton is sound, not that every one of tens
+    // of thousands of slot combinations works. Widening a filter leaves the
+    // skeleton, and the cooked version, unchanged.
+    expect(
+      computeStructureHash(archetype(), steps, [
+        slot({ accepts_filter: { any_tags: ["something", "entirely", "different"] } }),
+      ]),
+    ).toBe(baseline);
   });
 
   it("is unaffected by merges_from ordering", () => {
@@ -667,59 +695,95 @@ describe("validate: identity", () => {
       }),
     );
     expect(codes(issues)).toContain("step_id_mismatch");
-    expect(formatIssues(issues)).toContain("STEP_FIX_");
+    expect(formatIssues(issues)).toContain("STEP_FIX_ALPHA");
   });
 
-  it("catches a step ID with no slug after the short code", () => {
+  it("catches a step ID that disagrees with its own slug", () => {
     const issues = validate(
       emptyDataset({
         techniques: [technique()],
         archetypes: [archetype()],
-        steps: [step({ id: "STEP_FIX" })],
+        // Correct archetype, correct prefix, wrong slug.
+        steps: [step({ slug: "bloom_whole_spice", id: "STEP_FIX_SOMETHING_ELSE" })],
       }),
     );
     expect(codes(issues)).toContain("step_id_mismatch");
+    expect(formatIssues(issues)).toContain("STEP_FIX_BLOOM_WHOLE_SPICE");
   });
-});
 
-/* -------------------------------------------------------------------------- */
-/* validate() — verification                                                   */
-/* -------------------------------------------------------------------------- */
-
-describe("validate: verification integrity", () => {
-  const steps = [step()];
-  const slotRecords = [slot()];
-
-  it("passes when the verified hash matches the current structure", () => {
+  it("accepts an ID composed of short_code and slug", () => {
     const issues = validate(
       emptyDataset({
         techniques: [technique()],
-        archetypes: [verifiedArchetype(steps, slotRecords)],
-        steps,
-        slots: slotRecords,
+        archetypes: [archetype()],
+        steps: [step({ slug: "bloom_whole_spice" })],
       }),
     );
     expect(formatIssues(issues)).toBe("no issues");
   });
 
-  it("reverts verification when a cooking-relevant field changes", () => {
-    // Verified against the original steps, then a step is edited.
-    const verified = verifiedArchetype(steps, slotRecords);
-    const edited = [step({ operates_on: "both" })];
-
+  it("catches two steps sharing a slug within one archetype", () => {
     const issues = validate(
       emptyDataset({
         techniques: [technique()],
-        archetypes: [verified],
-        steps: edited,
-        slots: slotRecords,
+        archetypes: [archetype()],
+        steps: [
+          step({ slug: "alpha", position: 1 }),
+          step({ slug: "alpha", position: 2, id: "STEP_FIX_ALPHA_TWO" }),
+        ],
       }),
     );
+    expect(codes(issues)).toContain("duplicate_step_slug");
+  });
 
-    expect(codes(issues)).toContain("verification_reverted");
-    const message = formatIssues(issues);
-    expect(message).toContain("ARCH_FIXTURE");
-    expect(message).toContain("cook it again");
+  it("allows the same step slug on different archetypes", () => {
+    const issues = validate(
+      emptyDataset({
+        techniques: [technique()],
+        archetypes: [
+          archetype(),
+          archetype({ id: "ARCH_OTHER", slug: "other", short_code: "OTH" }),
+        ],
+        steps: [
+          step({ slug: "alpha" }),
+          step({
+            slug: "alpha",
+            id: "STEP_OTH_ALPHA",
+            archetype_id: "ARCH_OTHER",
+          }),
+        ],
+      }),
+    );
+    expect(codes(issues)).not.toContain("duplicate_step_slug");
+  });
+});
+
+describe("verification status is derived", () => {
+  const steps = [step()];
+  const slotRecords = [slot()];
+
+  it("is unverified when nothing was ever cooked", () => {
+    expect(deriveVerificationStatus(archetype(), steps, slotRecords)).toBe(
+      "unverified",
+    );
+  });
+
+  it("is author_verified when the recorded hash matches the structure", () => {
+    expect(
+      deriveVerificationStatus(
+        verifiedArchetype(steps, slotRecords),
+        steps,
+        slotRecords,
+      ),
+    ).toBe("author_verified");
+  });
+
+  it("reverts the instant a cooking-relevant field changes", () => {
+    const verified = verifiedArchetype(steps, slotRecords);
+    const edited = [step({ operates_on: "both" })];
+    expect(deriveVerificationStatus(verified, edited, slotRecords)).toBe(
+      "unverified",
+    );
   });
 
   it("does not revert on a prose edit", () => {
@@ -727,61 +791,80 @@ describe("validate: verification integrity", () => {
       description: "Original wording.",
     });
     const retyped = archetype({
-      verification_status: "author_verified",
       verified_at: VERIFIED_AT,
       verified_structure_hash: verified.verified_structure_hash,
       description: "Corrected wording.",
     });
-
-    const issues = validate(
-      emptyDataset({
-        techniques: [technique()],
-        archetypes: [retyped],
-        steps,
-        slots: slotRecords,
-      }),
+    expect(deriveVerificationStatus(retyped, steps, slotRecords)).toBe(
+      "author_verified",
     );
-    expect(codes(issues)).not.toContain("verification_reverted");
   });
 
-  it("does not check the hash of an unverified archetype", () => {
+  it("is never raised as a validation issue", () => {
+    // Reversion is reported, not enforced: editing an archetype is legitimate
+    // work and failing the build for it is a rule that gets switched off.
+    const verified = verifiedArchetype(steps, slotRecords);
     const issues = validate(
       emptyDataset({
         techniques: [technique()],
-        archetypes: [archetype()],
-        steps,
+        archetypes: [verified],
+        steps: [step({ operates_on: "both" })],
         slots: slotRecords,
       }),
     );
-    expect(codes(issues)).not.toContain("verification_reverted");
+    expect(formatIssues(issues)).toBe("no issues");
+  });
+});
+
+describe("reportVerification", () => {
+  const steps = [step()];
+  const slotRecords = [slot()];
+
+  it("counts never-verified, verified and reverted separately", () => {
+    const report = reportVerification(
+      [
+        archetype(),
+        verifiedArchetype(steps, slotRecords, { id: "ARCH_OK", short_code: "OK" }),
+      ],
+      steps,
+      slotRecords,
+    );
+    expect(report.never_verified).toBe(1);
+    expect(report.verified).toBe(1);
+    expect(report.reverted).toEqual([]);
   });
 
-  it("catches a stored structure_hash that no longer matches", () => {
-    const issues = validate(
-      emptyDataset({
-        techniques: [technique()],
-        archetypes: [archetype({ structure_hash: "0".repeat(64) })],
-        steps,
-        slots: slotRecords,
-      }),
+  it("names what reverted and why", () => {
+    const verified = verifiedArchetype(steps, slotRecords);
+    const report = reportVerification(
+      [verified],
+      [step({ operates_on: "both" })],
+      slotRecords,
     );
-    expect(codes(issues)).toContain("structure_hash_stale");
+
+    expect(report.verified).toBe(0);
+    expect(report.reverted).toHaveLength(1);
+    expect(report.reverted[0].id).toBe("ARCH_FIXTURE");
+    expect(report.reverted[0].verified_structure_hash).not.toBe(
+      report.reverted[0].current_structure_hash,
+    );
   });
 
-  it("accepts a stored structure_hash that matches", () => {
-    const issues = validate(
-      emptyDataset({
-        techniques: [technique()],
-        archetypes: [
-          archetype({
-            structure_hash: computeStructureHash(archetype(), steps, slotRecords),
-          }),
-        ],
-        steps,
-        slots: slotRecords,
-      }),
+  it("formats a build line", () => {
+    const clean = formatVerificationReport(
+      reportVerification([archetype()], steps, slotRecords),
     );
-    expect(codes(issues)).not.toContain("structure_hash_stale");
+    expect(clean).toBe("0 verified, 1 never verified");
+
+    const reverted = formatVerificationReport(
+      reportVerification(
+        [verifiedArchetype(steps, slotRecords)],
+        [step({ operates_on: "both" })],
+        slotRecords,
+      ),
+    );
+    expect(reverted).toContain("1 archetype reverted to unverified");
+    expect(reverted).toContain("ARCH_FIXTURE");
   });
 });
 
@@ -874,8 +957,8 @@ describe("validate: referential integrity", () => {
         techniques: [technique()],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ALPHA", position: 1 }),
-          step({ id: "STEP_FIX_BETA", position: 1, vessel_id: "tarka" }),
+          step({ slug: "alpha", position: 1 }),
+          step({ slug: "beta", position: 1, vessel_id: "tarka" }),
         ],
       }),
     );
@@ -915,16 +998,14 @@ describe("validate: vessels and merges", () => {
         techniques: [boil],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_MAIN", position: 1, technique_id: "TECH_BOIL" }),
-          step({
-            id: "STEP_FIX_TARKA",
+          step({ slug: "main", position: 1, technique_id: "TECH_BOIL" }),
+          step({ slug: "tarka",
             position: 2,
             vessel_id: "tarka",
             technique_id: "TECH_BOIL",
             operates_on: "slots",
           }),
-          step({
-            id: "STEP_FIX_COMBINE",
+          step({ slug: "combine",
             position: 3,
             technique_id: "TECH_BOIL",
             operates_on: "both",
@@ -942,9 +1023,8 @@ describe("validate: vessels and merges", () => {
         techniques: [boil],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_MAIN", position: 1, technique_id: "TECH_BOIL" }),
-          step({
-            id: "STEP_FIX_COMBINE",
+          step({ slug: "main", position: 1, technique_id: "TECH_BOIL" }),
+          step({ slug: "combine",
             position: 2,
             technique_id: "TECH_BOIL",
             operates_on: "both",
@@ -963,15 +1043,13 @@ describe("validate: vessels and merges", () => {
         techniques: [boil],
         archetypes: [archetype()],
         steps: [
-          step({
-            id: "STEP_FIX_COMBINE",
+          step({ slug: "combine",
             position: 1,
             technique_id: "TECH_BOIL",
             operates_on: "both",
             merges_from: ["tarka"],
           }),
-          step({
-            id: "STEP_FIX_TARKA",
+          step({ slug: "tarka",
             position: 2,
             vessel_id: "tarka",
             technique_id: "TECH_BOIL",
@@ -989,9 +1067,8 @@ describe("validate: vessels and merges", () => {
         techniques: [boil],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_MAIN", position: 1, technique_id: "TECH_BOIL" }),
-          step({
-            id: "STEP_FIX_COMBINE",
+          step({ slug: "main", position: 1, technique_id: "TECH_BOIL" }),
+          step({ slug: "combine",
             position: 2,
             technique_id: "TECH_BOIL",
             operates_on: "both",
@@ -1021,9 +1098,8 @@ describe("validate: vessels and merges", () => {
         techniques: [producer, consumer],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_MAIN", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({
-            id: "STEP_FIX_TARKA",
+          step({ slug: "main", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "tarka",
             position: 2,
             vessel_id: "tarka",
             technique_id: "TECH_CONSUMER",
@@ -1065,8 +1141,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, consumer(["softened"])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two", position: 2, technique_id: "TECH_CONSUMER" }),
         ],
       }),
     );
@@ -1079,8 +1155,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two", position: 2, technique_id: "TECH_CONSUMER" }),
         ],
       }),
     );
@@ -1094,8 +1170,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, consumer([])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two", position: 2, technique_id: "TECH_CONSUMER" }),
         ],
       }),
     );
@@ -1110,9 +1186,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_REDUCE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({
-            id: "STEP_FIX_SEAR",
+          step({ slug: "reduce", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "sear",
             position: 2,
             technique_id: "TECH_CONSUMER",
             operates_on: "slots",
@@ -1129,9 +1204,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({
-            id: "STEP_FIX_TWO",
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two",
             position: 2,
             technique_id: "TECH_CONSUMER",
             operates_on: "both",
@@ -1155,14 +1229,13 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, optional, consumer(["raw"])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({
-            id: "STEP_FIX_TWO",
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two",
             position: 2,
             technique_id: "TECH_OPTIONAL",
             is_optional: true,
           }),
-          step({ id: "STEP_FIX_THREE", position: 3, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "three", position: 3, technique_id: "TECH_CONSUMER" }),
         ],
       }),
     );
@@ -1183,9 +1256,9 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [unreachable, producer, consumer(["softened"])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ZERO", position: 1, technique_id: "TECH_UNREACHABLE" }),
-          step({ id: "STEP_FIX_ONE", position: 2, technique_id: "TECH_PRODUCER" }),
-          step({ id: "STEP_FIX_THREE", position: 3, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "zero", position: 1, technique_id: "TECH_UNREACHABLE" }),
+          step({ slug: "one", position: 2, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "three", position: 3, technique_id: "TECH_CONSUMER" }),
         ],
       }),
     );
@@ -1205,14 +1278,13 @@ describe("validate: produces satisfies accepts", () => {
         ],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({
-            id: "STEP_FIX_TWO",
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two",
             position: 2,
             technique_id: "TECH_SLOTS",
             operates_on: "slots",
           }),
-          step({ id: "STEP_FIX_THREE", position: 3, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "three", position: 3, technique_id: "TECH_CONSUMER" }),
         ],
       }),
     );
@@ -1225,8 +1297,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, consumer(["softened"])],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two", position: 2, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
         ],
       }),
     );
@@ -1238,8 +1310,8 @@ describe("validate: produces satisfies accepts", () => {
       emptyDataset({
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_GHOST" }),
-          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_GHOST" }),
+          step({ slug: "one", position: 1, technique_id: "TECH_GHOST" }),
+          step({ slug: "two", position: 2, technique_id: "TECH_GHOST" }),
         ],
       }),
     );
@@ -1259,8 +1331,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, follower],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({ id: "STEP_FIX_TWO", position: 2, technique_id: "TECH_CONSUMER" }),
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two", position: 2, technique_id: "TECH_CONSUMER" }),
         ],
       }),
     );
@@ -1282,9 +1354,8 @@ describe("validate: produces satisfies accepts", () => {
         techniques: [producer, follower],
         archetypes: [archetype()],
         steps: [
-          step({ id: "STEP_FIX_ONE", position: 1, technique_id: "TECH_PRODUCER" }),
-          step({
-            id: "STEP_FIX_TWO",
+          step({ slug: "one", position: 1, technique_id: "TECH_PRODUCER" }),
+          step({ slug: "two",
             position: 2,
             technique_id: "TECH_CONSUMER",
             operates_on: "slots",
@@ -1317,8 +1388,7 @@ describe("validate: accepts_filter compatibility", () => {
         ],
         archetypes: [archetype()],
         steps: [
-          step({
-            id: "STEP_FIX_FILTER",
+          step({ slug: "filter",
             technique_id: "TECH_FILTER",
             operates_on: operatesOn,
             consumes_slots: ["fixture_main"],

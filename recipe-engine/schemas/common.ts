@@ -169,10 +169,18 @@ export const ingredientStateSchema = z.enum([
   "rested",
 ]);
 
+/**
+ * **Derived, never authored or stored** (SPEC.md §3). Computed by comparing an
+ * archetype's `verified_structure_hash` against its freshly computed
+ * `structure_hash` — see `deriveVerificationStatus` in `lib/verification.ts`.
+ *
+ * It is deliberately absent from `archetypeSchema`: reversion is not enforced,
+ * it simply *is*, because there is no stored field to overwrite or override.
+ */
 export const verificationStatusSchema = z.enum([
-  /** Authored from research, never cooked. */
+  /** Authored from research, never cooked — or cooked, then restructured. */
   "unverified",
-  /** Cooked by the author, result was right. */
+  /** Cooked by the author against the current structure. */
   "author_verified",
   /** Cook log cleared the confidence threshold. */
   "community_verified",

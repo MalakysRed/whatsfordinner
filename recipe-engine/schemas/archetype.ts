@@ -7,7 +7,6 @@ import {
   flavourAxesSchema,
   shortCodeSchema,
   slugSchema,
-  verificationStatusSchema,
 } from "./common";
 
 /**
@@ -15,10 +14,12 @@ import {
  * in the system: nine slots with a realistic option list generate thousands of
  * coherent dishes from one authored row.
  *
- * `dish_class`, `adaptation_type` and `verification_status` are shared enums
- * from SPEC.md §0, so they live in `common.ts` and are imported here rather
- * than re-exported — re-exporting would make them ambiguous under the barrel's
- * `export *`.
+ * `dish_class` and `adaptation_type` are shared enums from SPEC.md §0, so they
+ * live in `common.ts` and are imported here rather than re-exported —
+ * re-exporting would make them ambiguous under the barrel's `export *`.
+ *
+ * Note what is *not* on this record: `verification_status` (derived) and
+ * `structure_hash` (computed). See the verification comment below.
  */
 
 export const scalingLimitsSchema = z
@@ -65,20 +66,19 @@ export const archetypeSchema = z
     /** What the user learns by cooking this. */
     teaching_summary: z.string().optional(),
 
-    verification_status: verificationStatusSchema.default("unverified"),
+    // Verification. What is authored is the *fact* of having cooked it, not a
+    // status: `verification_status` is derived (SPEC.md §3) and so is absent
+    // here, and `structure_hash` is computed from the record rather than stored
+    // on it — storing a value derivable at any moment would violate design
+    // rule 3 and create a staleness problem that exists only because of the
+    // redundancy. `verified_structure_hash` is the exception that *is* stored:
+    // a hash captured last September is history, not something recomputable.
+    /** When it was cooked. */
     verified_at: z.iso.datetime().optional(),
-    /** What was wrong the first time it was cooked. */
-    verification_note: z.string().optional(),
-
-    /**
-     * Hash of the cooking-relevant fields. Derived rather than authored — see
-     * `computeStructureHash` in `lib/structure-hash.ts`. Optional here because
-     * no author can compute it by hand; when it *is* present, `validate()`
-     * checks it against the recomputed value so a stale stored hash is caught.
-     */
-    structure_hash: z.string().min(1).optional(),
-    /** The `structure_hash` at the moment the archetype was verified. */
+    /** What the structure was at that moment. */
     verified_structure_hash: z.string().min(1).optional(),
+    /** What was wrong when it was cooked. */
+    verification_note: z.string().optional(),
 
     default_servings: z.number().int().min(1).default(4),
     scalable: z.boolean().default(true),
@@ -93,23 +93,17 @@ export const archetypeSchema = z
     /** Your own caveats and regional disputes. */
     authoring_notes: z.string().optional(),
   })
-  // Mirrors the two SQL CHECK constraints in SPEC.md §3. Without the date you
-  // cannot tell a current verification from a stale one; without the hash you
-  // cannot tell whether it still applies.
-  .refine(
-    (a) => a.verification_status === "unverified" || a.verified_at !== undefined,
-    {
-      message: "verified_at is required unless verification_status is 'unverified'",
-      path: ["verified_at"],
-    },
-  )
+  // Mirrors the SQL CHECK in SPEC.md §3:
+  //   CHECK ((verified_at IS NULL) = (verified_structure_hash IS NULL))
+  // Without the date you cannot tell a current verification from a stale one;
+  // without the hash you cannot tell whether it still applies. Half a
+  // verification record is not a verification.
   .refine(
     (a) =>
-      a.verification_status === "unverified" ||
-      a.verified_structure_hash !== undefined,
+      (a.verified_at === undefined) === (a.verified_structure_hash === undefined),
     {
       message:
-        "verified_structure_hash is required unless verification_status is 'unverified'",
+        "verified_at and verified_structure_hash must both be present or both absent",
       path: ["verified_structure_hash"],
     },
   );
