@@ -46,8 +46,8 @@ type so errors surface in the editor while authoring.
 - Metric only: grams, millilitres, tbsp = 15ml, tsp = 5ml. Never cups.
 - UK English spelling throughout, including in authored prose fields.
 - IDs are uppercase with a type prefix and are permanent once created:
-  `TECH_`, `PAT_`, `ARCH_`, `ING_`, `SLOT_`, `OPT_`, `RULE_`.
-  Never renumber or reuse an ID.
+  `TECH_`, `PAT_`, `ARCH_`, `STEP_`, `ING_`, `SLOT_`, `OPT_`, `RULE_`.
+  Never renumber or reuse an ID. Step IDs are never position derived.
 - One record per file, filename matching the slug.
 - Every authored record carries `status`: `draft` | `review` | `published`.
 - Archetypes carry `verification_status`: `unverified` until I have cooked it.
