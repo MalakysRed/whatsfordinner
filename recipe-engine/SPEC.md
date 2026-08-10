@@ -13,6 +13,8 @@
 3. **Nothing is stored that can be computed.** Effort, total time and equipment lists are derived from the step sequence at generation time.
 4. **Every option carries its own deltas.** This is what makes the live preview instant and deterministic — no model call in the interaction loop.
 5. **Status field on every authored table.** `draft` records are usable in development, invisible in production.
+6. **Local references use slugs; cross-record references use IDs.** A slot exists only inside its archetype, so `consumes_slots` and `condition.slot` name slot *slugs*, scoped to that archetype. Anything referring to a record that lives elsewhere — `technique_id`, `pattern_id`, `canonical_ingredient_id` — uses the permanent `ID`. `SLOT_` IDs still exist as database primary keys for `slot_option` to reference; both forms coexist deliberately. Renaming a slot slug then breaks references inside one file only, caught immediately by the validator.
+7. **Keep the state vocabulary coarse.** `produces` and `accepts` values should number roughly eight to twelve across the whole system — `softened`, `browned`, `reduced`, `sealed`, `tender`, `thickened`, `combined`. Precise culinary description belongs in `sensory_cues` and `sensory_target`, which humans read. Over-specific machine states ("translucent but not yet golden") make optional steps unskippable and produce constant false validation failures.
 
 ---
 
@@ -42,6 +44,34 @@ CREATE TYPE typicality AS ENUM (
 CREATE TYPE authoring_status AS ENUM ('draft','review','published','deprecated');
 
 CREATE TYPE slot_cardinality AS ENUM ('exactly_one','one_to_three','zero_to_three','one_to_many');
+
+CREATE TYPE operates_on AS ENUM (
+  'vessel',   -- acts on accumulated pan contents
+  'slots',    -- acts only on newly introduced fills
+  'both'      -- new fills joined to existing contents
+);
+
+CREATE TYPE verification_status AS ENUM (
+  'unverified',           -- authored from research, never cooked
+  'author_verified',      -- cooked by the author, result was right
+  'community_verified'    -- cook log cleared the confidence threshold
+);
+
+-- Strict by design. Adding a value should be a deliberate act meaning a
+-- genuinely new structural category, not a dish that did not fit.
+CREATE TYPE dish_class AS ENUM (
+  'braise','stew','roast','traybake','pan_sauce','fry','deep_fry','stir_fry',
+  'soup','bake','pasta','rice','flatbread','pastry','grill','salad','no_cook'
+);
+
+CREATE TYPE adaptation_type AS ENUM (
+  'traditional','regional_traditional','diaspora',
+  'restaurant_style','western_adaptation','fusion'
+);
+
+CREATE TYPE slot_role AS ENUM (
+  'main','aromatic','spice','fat','acid','liquid','starch','garnish','pantry'
+);
 ```
 
 ---
@@ -245,13 +275,17 @@ CREATE TABLE archetype (
   display_name        text NOT NULL,
   status              authoring_status NOT NULL DEFAULT 'draft',
 
-  dish_class          text NOT NULL,       -- curry | braise | stir_fry | soup | bake | pasta | salad | roast
+  dish_class          dish_class NOT NULL,
   cuisine_ids         text[] NOT NULL,
-  adaptation_type     text NOT NULL,       -- traditional | regional_traditional | diaspora | restaurant_style | western_adaptation
+  adaptation_type     adaptation_type NOT NULL,
   region_note         text,
 
   description         text NOT NULL,       -- authored, shown before slot filling
   teaching_summary    text,                -- what the user learns by cooking this
+
+  verification_status verification_status NOT NULL DEFAULT 'unverified',
+  verified_at         timestamptz,
+  verification_note   text,                -- what was wrong the first time it was cooked
 
   default_servings    smallint NOT NULL DEFAULT 4,
   scalable            boolean NOT NULL DEFAULT true,
@@ -296,9 +330,13 @@ Supports the pluggable entry points without a separate ranking table per door.
 
 Ordered operation sequence.
 
+**A step does not always transform the previous step's output.** Some steps act on the accumulated pan contents, some introduce new ingredients and act only on those, some do both. Conflating these produces false validation failures — searing raw protein after reducing a sauce is correct cooking, not a state mismatch. `operates_on` resolves it.
+
+**Steps are also not always a single line.** Dal boils pulses in one pan while a tarka is prepared in another; risotto keeps a stock pan alongside; biryani runs three streams. `vessel_id` partitions the sequence so chaining is validated within a stream rather than globally.
+
 ```sql
 CREATE TABLE archetype_step (
-  id                text PRIMARY KEY,
+  id                text PRIMARY KEY,      -- STEP_<ARCHCODE>_<SLUG>
   archetype_id      text NOT NULL REFERENCES archetype(id) ON DELETE CASCADE,
   position          smallint NOT NULL,
 
@@ -307,7 +345,14 @@ CREATE TABLE archetype_step (
   CHECK (num_nonnulls(technique_id, pattern_id) = 1),
 
   purpose           text NOT NULL,        -- why this step exists; teaching content
-  consumes_slots    text[] NOT NULL DEFAULT '{}',
+  consumes_slots    text[] NOT NULL DEFAULT '{}',   -- slot SLUGS, scoped to this archetype
+
+  -- What the technique acts on. Determines which validation applies.
+  operates_on       operates_on NOT NULL,
+
+  -- Stream partitioning. Chaining is validated within a vessel, in position order.
+  vessel_id         text NOT NULL DEFAULT 'main',
+  merges_from       text[] NOT NULL DEFAULT '{}',   -- vessel_ids joined at this step
 
   is_optional       boolean NOT NULL DEFAULT false,
   condition         jsonb,                -- e.g. {"slot":"souring_agent","filled":true}
@@ -316,13 +361,30 @@ CREATE TABLE archetype_step (
   duration_override jsonb,
   attention_override attention_level,
   sensory_target    text NOT NULL,        -- what it should look/smell like when done
-  can_run_parallel_with text[] NOT NULL DEFAULT '{}',   -- drives coordination load
 
   UNIQUE (archetype_id, position)
 );
 ```
 
-`can_run_parallel_with` is what lets you compute the coordination load axis honestly rather than guessing: count the maximum number of concurrently active steps.
+### `operates_on`
+
+| Value | Subject | Validation applied |
+|---|---|---|
+| `vessel` | Accumulated contents of `vessel_id` | Previous step in the same vessel: `produces` must satisfy `accepts` |
+| `slots` | Only the newly introduced fills | Each consumed slot's `accepts_filter` must be compatible with the technique's `accepts`. **No chain check.** |
+| `both` | New fills joined to existing contents | Fills validated as above. **No chain check** — the vessel state is deliberately being changed. |
+
+Examples: reduce and simmer are `vessel`; searing the hero protein and blooming whole spices are `slots`; adding stock to a fried base and simmering is `both`.
+
+A step with non-empty `merges_from` must be `both`.
+
+### Parallelism is derived, not authored
+
+`can_run_parallel_with` has been removed. Steps in different vessels with overlapping position ranges are concurrent by definition, so coordination load is computed from `vessel_id` and position rather than hand maintained. One fewer field to keep consistent while reordering steps.
+
+### Step IDs
+
+`STEP_` + archetype short code + slug: `STEP_NIC_BLOOM_WHOLE_SPICE`. **Never position derived.** Steps get reordered constantly during authoring, and position based IDs would break every reference on each reorder.
 
 ---
 
@@ -339,7 +401,7 @@ CREATE TABLE slot (
   ui_prompt         text NOT NULL,         -- "What are you cooking with?"
   ui_order          smallint NOT NULL,
 
-  role              text NOT NULL,         -- main | aromatic | spice | fat | acid | liquid | garnish | pantry
+  role              slot_role NOT NULL,
   cardinality       slot_cardinality NOT NULL,
   is_required       boolean NOT NULL DEFAULT true,
 
@@ -375,6 +437,25 @@ CREATE TABLE slot_option (
 
 CREATE INDEX ON slot_option (slot_id, suitability DESC);
 ```
+
+### `accepts_filter`
+
+Tag matching only. **No query language, no DSL, no parser.** If this proves insufficient, extend it when a real archetype demands it — not before.
+
+```jsonc
+{
+  "any_tags":     ["red_meat","poultry"],   // must carry at least one
+  "all_tags":     ["raw"],                  // optional: must carry all
+  "exclude_tags": ["cured"],                // optional
+  "exclude_ids":  ["ING_00219"]             // optional: specific exceptions
+}
+```
+
+Validation for a `slots` or `both` step: every ingredient satisfying the filter must also satisfy the technique's `accepts`. A filter that admits an ingredient the technique cannot take is an authoring error, caught at build time rather than at generation time.
+
+### `adds_steps` — deferred
+
+Left permissive (`jsonb`, unvalidated) on purpose. The first archetype that genuinely needs a slot option to inject an extra step defines the shape. Specifying it now, with no use case, produces a field nobody can use correctly.
 
 ### `effect_on` — the live preview payload
 
@@ -417,22 +498,38 @@ Note that a poor option is not hidden. It is offered, scored, and honestly annot
 
 ## 6. Worked archetype
 
-`ARCH_CURRY_NORTH_INDIAN`
+`ARCH_CURRY_NORTH_INDIAN` — short code `NIC`. Single vessel throughout.
 
-| Pos | Technique / Pattern | Slots consumed | Sensory target | Optional |
-|---|---|---|---|---|
-| 1 | TECH_BLOOM_WHOLE_SPICE | whole_spice, cooking_fat | Seeds popping, fragrant, not dark | yes |
-| 2 | TECH_SWEAT then TECH_FRY_AROMATIC | aromatic_base | Deep gold, jammy, no raw smell | no |
-| 3 | TECH_FRY_PASTE | ginger_garlic | Fat separating at the edges | no |
-| 4 | TECH_BLOOM_GROUND_SPICE | ground_spice | 30 seconds only, fragrant, never dark | no |
-| 5 | TECH_REDUCE | souring_agent | Thick, fat pooling | yes (cond: souring_agent filled) |
-| 6 | TECH_SEAR / TECH_ADD | hero_protein | Coated and sealed | no |
-| 7 | TECH_SIMMER | liquid | Sauce clings to a spoon | no |
-| 8 | TECH_FINISH | finishing_dairy, finishing_herb | Glossy, fresh smelling | yes |
+| Pos | Technique / Pattern | `operates_on` | Slots consumed | Sensory target | Optional |
+|---|---|---|---|---|---|
+| 1 | TECH_BLOOM_WHOLE_SPICE | slots | whole_spice, cooking_fat | Seeds popping, fragrant, not dark | yes |
+| 2 | TECH_SWEAT then TECH_FRY_AROMATIC | both | aromatic_base | Deep gold, jammy, no raw smell | no |
+| 3 | TECH_FRY_PASTE | both | ginger_garlic | Fat separating at the edges | no |
+| 4 | TECH_BLOOM_GROUND_SPICE | both | ground_spice | 30 seconds only, fragrant, never dark | no |
+| 5 | TECH_REDUCE | both | souring_agent | Thick, fat pooling | yes (cond: souring_agent filled) |
+| 6 | TECH_SEAR / TECH_ADD | slots | hero_protein | Coated and sealed | no |
+| 7 | TECH_SIMMER | both | liquid | Sauce clings to a spoon | no |
+| 8 | TECH_FINISH | both | finishing_dairy, finishing_herb | Glossy, fresh smelling | yes |
+
+Note step 6: `operates_on: 'slots'`, so raw protein after a reduced sauce is not a state mismatch. Under the original rule this archetype would have failed validation while being correct cooking — which is what prompted the `operates_on` field.
 
 **Slots:** `whole_spice` (0–3), `aromatic_base` (exactly one), `ginger_garlic` (exactly one), `ground_spice` (1–3), `souring_agent` (0–1), `hero_protein` (exactly one), `liquid` (exactly one), `finishing_dairy` (0–1), `finishing_herb` (0–1).
 
 Nine slots, with a realistic option list per slot, generates thousands of coherent distinct dishes from one archetype — all of them structurally sound, because the skeleton is authored rather than invented per request.
+
+### Contrast: a two vessel archetype
+
+`ARCH_DAL_TARKA` runs two streams that converge, which is why `vessel_id` exists:
+
+| Pos | Vessel | Technique | `operates_on` | Merges from |
+|---|---|---|---|---|
+| 1 | main | TECH_BOIL_PULSE | slots | — |
+| 2 | main | TECH_SIMMER_TO_COLLAPSE | vessel | — |
+| 3 | tarka | TECH_BLOOM_WHOLE_SPICE | slots | — |
+| 4 | tarka | TECH_FRY_AROMATIC | both | — |
+| 5 | main | TECH_COMBINE | both | ['tarka'] |
+
+Steps 3 and 4 overlap in position range with 1 and 2 but sit in a different vessel, so coordination load is computed rather than authored.
 
 ---
 
@@ -442,7 +539,27 @@ Enforced in code at generation time. Rejection, not correction.
 
 **Referential:** every ID emitted by the model exists; every slot_option belongs to the slot it fills; required slots are filled; cardinality respected; no conflicting options co-selected.
 
-**Sequencing:** each step's `produces` satisfies the next step's `accepts`; no `cannot_follow` violation; prerequisites satisfied for the user's technique level if level gating is on.
+**Sequencing:** validated **per vessel**, in position order, and only for steps where `operates_on = 'vessel'` — such a step's `accepts` must be satisfiable by whichever step actually precedes it at runtime. Because optional steps may be skipped, that is not simply the step at `position - 1`.
+
+**The optional step walk.** For each `vessel` step, walk *backwards* through the same `vessel_id` collecting candidate predecessors: every optional `vessel` or `both` step encountered, and then the first mandatory one, at which point the walk stops. The step's `accepts` must be satisfied by the `produces` of **every** candidate in that set.
+
+Worked example — step 4 mandatory, steps 5 and 6 optional, step 7 mandatory:
+
+| Step | Must be satisfiable by |
+|---|---|
+| 7 | 6, 5, 4 |
+| 6 | 5, 4 |
+| 5 | 4 |
+
+This covers every combination of skips. Checking only `position - 1` would pass an archetype that breaks the moment a user's selections omit an optional step — a failure invisible at authoring time and visible in someone's kitchen.
+
+Both `vessel` and `both` steps are valid predecessors, since each leaves the pan in a new state. Steps with `operates_on` of `slots` or `both` are exempt as *targets* of the check, because they introduce new ingredients rather than transforming what is already there; for those, each consumed slot's `accepts_filter` must instead be compatible with the technique's `accepts`.
+
+Also check: no `cannot_follow` violation; every `merges_from` vessel exists and has at least one prior step; prerequisites satisfied for the user's technique level if level gating is on.
+
+**Known limitation, recorded rather than fixed:** the walk treats all skip combinations as reachable, but `condition` values can make some mutually exclusive. It will therefore occasionally flag a combination that cannot actually occur. This is left deliberately — a false positive is visible and irritating, a false negative is invisible and ends up in a user's pan. If a real archetype throws a spurious failure, that is the trigger to make the walk condition aware.
+
+**Deliberately not checked yet:** full vessel state accumulation — tracking what is actually in each pan, so that "you simmered something that was never given liquid" is caught. A real error class, but rarer than ordering mistakes, and it needs a combination model (what does `seared` become when cold stock is added?) that cannot be designed well against imaginary archetypes. Deferring costs nothing: it would consume exactly the `produces` / `accepts` data being authored now, so nothing needs re-authoring when it is added.
 
 **Quantity:** every quantity traces to a `quantity_rule_id`; total weight per serving within plausible bounds for the dish class; seasoning within the constraint layer's range; liquid ratios within range.
 
