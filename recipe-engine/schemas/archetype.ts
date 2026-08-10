@@ -1,49 +1,24 @@
 import { z } from "zod";
 import {
+  adaptationTypeSchema,
   archetypeIdSchema,
   authoringStatusSchema,
+  dishClassSchema,
   flavourAxesSchema,
   slugSchema,
+  verificationStatusSchema,
 } from "./common";
 
 /**
  * `archetype` — SPEC.md §3. The dish skeleton, and the highest leverage table
  * in the system: nine slots with a realistic option list generate thousands of
  * coherent dishes from one authored row.
+ *
+ * `dish_class`, `adaptation_type` and `verification_status` are shared enums
+ * from SPEC.md §0, so they live in `common.ts` and are imported here rather
+ * than re-exported — re-exporting would make them ambiguous under the barrel's
+ * `export *`.
  */
-
-/**
- * SPEC.md types `dish_class` as `text` but enumerates the values inline. Modelled
- * as an enum so a typo fails at authoring time rather than silently creating a
- * new dish class. Relax to `z.string()` if the vocabulary is meant to be open.
- */
-export const dishClassSchema = z.enum([
-  "curry",
-  "braise",
-  "stir_fry",
-  "soup",
-  "bake",
-  "pasta",
-  "salad",
-  "roast",
-]);
-
-/** Same treatment as `dish_class`: `text` in SQL, enumerated in the comment. */
-export const adaptationTypeSchema = z.enum([
-  "traditional",
-  "regional_traditional",
-  "diaspora",
-  "restaurant_style",
-  "western_adaptation",
-]);
-
-/**
- * Root `CLAUDE.md` requires archetypes to carry `verification_status`,
- * `unverified` until the dish has actually been cooked. SPEC.md §3 does not
- * list the column, so this reconciles the two — the value set is inferred and
- * worth confirming.
- */
-export const verificationStatusSchema = z.enum(["unverified", "verified"]);
 
 export const scalingLimitsSchema = z
   .object({
@@ -75,7 +50,6 @@ export const archetypeSchema = z.object({
   slug: slugSchema,
   display_name: z.string().min(1),
   status: authoringStatusSchema.default("draft"),
-  verification_status: verificationStatusSchema.default("unverified"),
 
   dish_class: dishClassSchema,
   cuisine_ids: z.array(z.string()).min(1),
@@ -86,6 +60,11 @@ export const archetypeSchema = z.object({
   description: z.string().min(1),
   /** What the user learns by cooking this. */
   teaching_summary: z.string().optional(),
+
+  verification_status: verificationStatusSchema.default("unverified"),
+  verified_at: z.iso.datetime().optional(),
+  /** What was wrong the first time it was cooked. */
+  verification_note: z.string().optional(),
 
   default_servings: z.number().int().min(1).default(4),
   scalable: z.boolean().default(true),
@@ -101,10 +80,8 @@ export const archetypeSchema = z.object({
   authoring_notes: z.string().optional(),
 });
 
-export type DishClass = z.infer<typeof dishClassSchema>;
-export type AdaptationType = z.infer<typeof adaptationTypeSchema>;
-export type VerificationStatus = z.infer<typeof verificationStatusSchema>;
 export type EntryAffinities = z.infer<typeof entryAffinitiesSchema>;
+export type ScalingLimits = z.infer<typeof scalingLimitsSchema>;
 
 /** Parsed shape — defaults applied. */
 export type Archetype = z.infer<typeof archetypeSchema>;

@@ -1,5 +1,6 @@
 import type {
   Accepts,
+  AcceptsFilter,
   Archetype,
   ArchetypeStep,
   Produces,
@@ -17,12 +18,22 @@ import type {
  * which is what makes data validity part of the build rather than a warning
  * someone scrolls past.
  *
- * Scope: this implements SPEC.md §7's *referential* group and the
- * `produces` → `accepts` half of the *sequencing* group. The `cannot_follow`
- * check, cardinality, conflicting co-selection, the quantity group, the
- * coherence group and the prose group are not implemented here — those either
- * need the constraint layer (not yet specced) or a generated recipe to check
- * against, rather than the authored corpus alone.
+ * Implemented: SPEC.md §7's referential group, the per-vessel `produces` →
+ * `accepts` walk, `cannot_follow`, the `accepts_filter` compatibility check for
+ * `slots`/`both` steps, and `merges_from` resolution.
+ *
+ * Deliberately not implemented, per SPEC.md §7:
+ *   - Condition-aware skip combinations. The walk treats every skip as
+ *     reachable, so it can flag a combination `condition` makes impossible. A
+ *     false positive is visible and irritating; a false negative ends up in
+ *     someone's pan.
+ *   - Full vessel state accumulation. It needs a combination model that cannot
+ *     be designed against imaginary archetypes, and deferring costs nothing —
+ *     it would consume exactly the `produces`/`accepts` data authored now.
+ *
+ * Also out of scope here: the quantity, coherence and prose groups, which need
+ * the constraint layer or a generated recipe rather than the authored corpus;
+ * and technique-level gating, which needs a user.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -33,7 +44,7 @@ import type {
  * The minimum a `pattern` must expose for sequencing. SPEC.md §2 defines the
  * full table, but no Zod schema for it has been written yet, so only the field
  * the sequencing check reads is modelled. A pattern has a `produces` but no
- * `accepts`, so a step that runs a pattern accepts anything.
+ * `accepts`, so a pattern step is unconstrained on input.
  */
 export interface PatternRef {
   id: string;
@@ -71,7 +82,10 @@ export type IssueCode =
   | "duplicate_position"
   | "unresolved_reference"
   | "reference_wrong_owner"
-  | "sequencing_mismatch";
+  | "sequencing_mismatch"
+  | "cannot_follow_violation"
+  | "filter_incompatible"
+  | "merge_without_prior_step";
 
 export interface ValidationIssue {
   code: IssueCode;
@@ -105,7 +119,6 @@ export function validate(data: Dataset): ValidationIssue[] {
   const techniqueById = byId(data.techniques);
   const patternById = byId(patterns);
   const archetypeById = byId(data.archetypes);
-  const stepById = byId(data.steps);
   const slotById = byId(data.slots);
   const slotOptionById = byId(data.slotOptions);
 
@@ -113,15 +126,13 @@ export function validate(data: Dataset): ValidationIssue[] {
   const quantityRuleIds = optionalSet(data.quantityRuleIds);
   const equipmentIds = optionalSet(data.equipmentIds);
 
-  /** Slot slugs per archetype — `consumes_slots` references slugs, not IDs. */
-  const slotSlugsByArchetype = new Map<string, Set<string>>();
+  /**
+   * Slots keyed by `archetype_id::slug` — local references use slugs scoped to
+   * the archetype (SPEC.md design rule 6).
+   */
+  const slotByLocalRef = new Map<string, Slot>();
   for (const slot of data.slots) {
-    let slugs = slotSlugsByArchetype.get(slot.archetype_id);
-    if (!slugs) {
-      slugs = new Set<string>();
-      slotSlugsByArchetype.set(slot.archetype_id, slugs);
-    }
-    slugs.add(slot.slug);
+    slotByLocalRef.set(localRef(slot.archetype_id, slot.slug), slot);
   }
 
   /* ---- technique references --------------------------------------------- */
@@ -204,6 +215,20 @@ export function validate(data: Dataset): ValidationIssue[] {
         message: `quantity_rule_id references unknown rule ${slot.quantity_rule_id}`,
       });
     }
+
+    if (ingredientIds) {
+      for (const ref of slot.accepts_filter.exclude_ids) {
+        if (!ingredientIds.has(ref)) {
+          add({
+            code: "unresolved_reference",
+            entity: "slot",
+            id: slot.id,
+            field: "accepts_filter",
+            message: `accepts_filter.exclude_ids references unknown ingredient ${ref}`,
+          });
+        }
+      }
+    }
   }
 
   /* ---- slot_option references -------------------------------------------- */
@@ -285,10 +310,8 @@ export function validate(data: Dataset): ValidationIssue[] {
       });
     }
 
-    const archetypeSlots = slotSlugsByArchetype.get(step.archetype_id);
-
     for (const slug of step.consumes_slots) {
-      if (!archetypeSlots?.has(slug)) {
+      if (!slotByLocalRef.has(localRef(step.archetype_id, slug))) {
         add({
           code: "unresolved_reference",
           entity: "archetype_step",
@@ -299,7 +322,10 @@ export function validate(data: Dataset): ValidationIssue[] {
       }
     }
 
-    if (step.condition && !archetypeSlots?.has(step.condition.slot)) {
+    if (
+      step.condition &&
+      !slotByLocalRef.has(localRef(step.archetype_id, step.condition.slot))
+    ) {
       add({
         code: "unresolved_reference",
         entity: "archetype_step",
@@ -308,33 +334,145 @@ export function validate(data: Dataset): ValidationIssue[] {
         message: `condition references slot "${step.condition.slot}", which no slot on archetype ${step.archetype_id} declares`,
       });
     }
+  }
 
-    for (const ref of step.can_run_parallel_with) {
-      const other = stepById.get(ref);
-      if (!other) {
-        add({
+  /* ---- vessels, sequencing and slot filters ------------------------------- */
+  issues.push(...checkMerges(data));
+  issues.push(...checkSlotFilters(data, techniqueById, slotByLocalRef));
+  issues.push(...checkSequencing(data, techniqueById, patternById));
+
+  return issues;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Vessels                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every `merges_from` vessel must exist within the same archetype and have at
+ * least one step before the merging step — merging in a stream that has not
+ * run yet is an ordering error, not a naming one.
+ *
+ * The schema already guarantees a step with a non-empty `merges_from` is
+ * `operates_on: 'both'` (SPEC.md §4), so that is not re-checked here.
+ */
+function checkMerges(data: Dataset): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  /** archetype_id -> vessel_id -> earliest position seen in that vessel. */
+  const earliestByVessel = new Map<string, Map<string, number>>();
+  for (const step of data.steps) {
+    let vessels = earliestByVessel.get(step.archetype_id);
+    if (!vessels) {
+      vessels = new Map<string, number>();
+      earliestByVessel.set(step.archetype_id, vessels);
+    }
+    const seen = vessels.get(step.vessel_id);
+    if (seen === undefined || step.position < seen) {
+      vessels.set(step.vessel_id, step.position);
+    }
+  }
+
+  for (const step of data.steps) {
+    if (step.merges_from.length === 0) continue;
+    const vessels = earliestByVessel.get(step.archetype_id);
+
+    for (const vessel of step.merges_from) {
+      const earliest = vessels?.get(vessel);
+      if (earliest === undefined) {
+        issues.push({
           code: "unresolved_reference",
           entity: "archetype_step",
           id: step.id,
-          field: "can_run_parallel_with",
-          message: `can_run_parallel_with references unknown step ${ref}`,
+          field: "merges_from",
+          message: `merges_from references vessel "${vessel}", which no step on archetype ${step.archetype_id} uses`,
         });
-      } else if (other.archetype_id !== step.archetype_id) {
-        add({
-          code: "reference_wrong_owner",
+      } else if (earliest >= step.position) {
+        issues.push({
+          code: "merge_without_prior_step",
           entity: "archetype_step",
           id: step.id,
-          field: "can_run_parallel_with",
-          message: `can_run_parallel_with references step ${ref} on archetype ${other.archetype_id}, not ${step.archetype_id}`,
+          field: "merges_from",
+          message: `merges_from references vessel "${vessel}", whose first step is at position ${earliest} — at or after this step's position ${step.position}`,
         });
       }
     }
   }
 
-  /* ---- sequencing --------------------------------------------------------- */
-  issues.push(...checkSequencing(data, techniqueById, patternById));
+  return issues;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Slot filter compatibility                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * For a `slots` or `both` step, every ingredient the slot's `accepts_filter`
+ * admits must also satisfy the technique's `accepts` (SPEC.md §5). A filter
+ * that admits an ingredient the technique cannot take is an authoring error,
+ * caught at build time rather than at generation time.
+ *
+ * There is no ingredient ontology yet, so this reasons over tags alone rather
+ * than enumerating ingredients. Only `ingredient_tags` is compared: a filter
+ * carries no state or form information, and `accepts.states` / `accepts.forms`
+ * draw on a different vocabulary — the spec's own example has `raw` as both a
+ * tag and a state, which is exactly the conflation to avoid.
+ */
+function checkSlotFilters(
+  data: Dataset,
+  techniqueById: Map<string, Technique>,
+  slotByLocalRef: Map<string, Slot>,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const step of data.steps) {
+    if (step.operates_on === "vessel") continue;
+    if (step.technique_id === undefined) continue;
+
+    const technique = techniqueById.get(step.technique_id);
+    // Unresolved technique is already reported as a reference issue.
+    if (!technique) continue;
+
+    for (const slug of step.consumes_slots) {
+      const slot = slotByLocalRef.get(localRef(step.archetype_id, slug));
+      if (!slot) continue; // already reported
+
+      const offending = incompatibleTags(slot.accepts_filter, technique.accepts);
+      if (offending.length === 0) continue;
+
+      issues.push({
+        code: "filter_incompatible",
+        entity: "archetype_step",
+        id: step.id,
+        field: "consumes_slots",
+        message:
+          `slot "${slug}" admits ingredients tagged [${offending.join(", ")}], ` +
+          `which technique ${technique.id} does not accept ` +
+          `(accepts.ingredient_tags: [${technique.accepts.ingredient_tags.join(", ")}])`,
+      });
+    }
+  }
 
   return issues;
+}
+
+/**
+ * Tags the filter admits that the technique cannot take.
+ *
+ * An ingredient admitted by the filter is guaranteed to carry only one of
+ * `any_tags` plus all of `all_tags` — anything else it happens to carry is
+ * unknown. So the filter is compatible when that guaranteed set always meets
+ * `accepts.ingredient_tags`: either a required tag is itself accepted, or every
+ * alternative in `any_tags` is.
+ */
+function incompatibleTags(filter: AcceptsFilter, accepts: Accepts): string[] {
+  // Empty means unconstrained, matching SPEC.md's `can_follow` convention.
+  if (accepts.ingredient_tags.length === 0) return [];
+
+  const accepted = new Set(accepts.ingredient_tags);
+  if (filter.all_tags.some((tag) => accepted.has(tag))) return [];
+
+  return filter.any_tags.filter((tag) => !accepted.has(tag));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -342,13 +480,19 @@ export function validate(data: Dataset): ValidationIssue[] {
 /* -------------------------------------------------------------------------- */
 
 /**
- * SPEC.md §7: "each step's `produces` satisfies the next step's `accepts`".
+ * SPEC.md §7, validated **per vessel**, in position order, and only for steps
+ * where `operates_on = 'vessel'`.
  *
- * "The next step" is not simply `position + 1`. An optional step may be skipped
- * at generation time, so a step's output has to be acceptable to every step it
- * could actually flow into: each optional step that follows it, plus the first
- * mandatory one. Checking only the immediate neighbour would let an archetype
- * pass that breaks the moment an optional step is dropped.
+ * For each such step, walk *backwards* through the same `vessel_id` collecting
+ * candidate predecessors: every optional `vessel` or `both` step, then the
+ * first mandatory one, at which point the walk stops. The step's `accepts` must
+ * be satisfied by the `produces` of *every* candidate — that is what covers all
+ * combinations of skips. Checking only `position - 1` would pass an archetype
+ * that breaks the moment a user's selections omit an optional step.
+ *
+ * `slots` steps are skipped during the walk rather than ending it: they act
+ * only on newly introduced fills, so they leave the accumulated vessel contents
+ * as the previous `vessel`/`both` step left them.
  */
 function checkSequencing(
   data: Dataset,
@@ -357,19 +501,13 @@ function checkSequencing(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
-  const stepsByArchetype = new Map<string, ArchetypeStep[]>();
-  for (const step of data.steps) {
-    const list = stepsByArchetype.get(step.archetype_id);
-    if (list) list.push(step);
-    else stepsByArchetype.set(step.archetype_id, [step]);
-  }
+  const stepsByArchetype = groupBy(data.steps, (step) => step.archetype_id);
 
-  for (const [archetypeId, steps] of stepsByArchetype) {
-    const ordered = [...steps].sort((a, b) => a.position - b.position);
-
-    // UNIQUE (archetype_id, position) — without it "the next step" is undefined.
+  for (const [archetypeId, archetypeSteps] of stepsByArchetype) {
+    // UNIQUE (archetype_id, position) — spans vessels, so it is checked over
+    // the whole archetype rather than per stream.
     const seenPositions = new Map<number, string>();
-    for (const step of ordered) {
+    for (const step of [...archetypeSteps].sort(byPosition)) {
       const first = seenPositions.get(step.position);
       if (first !== undefined) {
         issues.push({
@@ -384,32 +522,56 @@ function checkSequencing(
       }
     }
 
-    for (let i = 0; i < ordered.length - 1; i++) {
-      const step = ordered[i];
-      const produces = producesOf(step, techniqueById, patternById);
-      // An unresolved technique/pattern is already reported as a reference
-      // issue; re-reporting it as a sequencing failure would be noise.
-      if (!produces) continue;
+    const byVessel = groupBy(archetypeSteps, (step) => step.vessel_id);
 
-      for (const next of reachableSuccessors(ordered, i)) {
-        const accepts = acceptsOf(next, techniqueById);
-        if (!accepts) continue;
-        if (statesSatisfied(produces, accepts)) continue;
+    for (const vesselSteps of byVessel.values()) {
+      const ordered = [...vesselSteps].sort(byPosition);
 
-        issues.push({
-          code: "sequencing_mismatch",
-          entity: "archetype_step",
-          id: next.id,
-          field: "accepts",
-          message:
-            `step ${step.id} (position ${step.position}) produces state "${produces.state}", ` +
-            `but step ${next.id} (position ${next.position}) accepts only ` +
-            `[${accepts.states.join(", ")}]` +
-            (next.consumes_slots.length > 0
-              ? ` — note that ${next.id} consumes slots [${next.consumes_slots.join(", ")}], ` +
-                `so it may be intended to accept those fills rather than the previous step's output`
-              : ""),
-        });
+      for (let i = 0; i < ordered.length; i++) {
+        const target = ordered[i];
+        if (target.operates_on !== "vessel") continue;
+
+        const accepts = acceptsOf(target, techniqueById);
+
+        for (const predecessor of predecessorsOf(ordered, i)) {
+          const technique = techniqueById.get(target.technique_id ?? "");
+          const predecessorTechniqueId = predecessor.technique_id;
+
+          if (
+            technique &&
+            predecessorTechniqueId !== undefined &&
+            technique.cannot_follow.includes(predecessorTechniqueId)
+          ) {
+            issues.push({
+              code: "cannot_follow_violation",
+              entity: "archetype_step",
+              id: target.id,
+              field: "cannot_follow",
+              message:
+                `technique ${technique.id} declares it cannot follow ${predecessorTechniqueId}, ` +
+                `but step ${predecessor.id} (position ${predecessor.position}) can precede ` +
+                `${target.id} (position ${target.position}) in vessel "${target.vessel_id}"`,
+            });
+          }
+
+          if (!accepts) continue;
+          const produces = producesOf(predecessor, techniqueById, patternById);
+          // Unresolved technique/pattern is already a reference issue.
+          if (!produces) continue;
+          if (statesSatisfied(produces, accepts)) continue;
+
+          issues.push({
+            code: "sequencing_mismatch",
+            entity: "archetype_step",
+            id: target.id,
+            field: "accepts",
+            message:
+              `in vessel "${target.vessel_id}", step ${predecessor.id} ` +
+              `(position ${predecessor.position}${predecessor.is_optional ? ", optional" : ""}) ` +
+              `produces state "${produces.state}", but step ${target.id} ` +
+              `(position ${target.position}) accepts only [${accepts.states.join(", ")}]`,
+          });
+        }
       }
     }
   }
@@ -418,19 +580,19 @@ function checkSequencing(
 }
 
 /**
- * The steps a given step's output can reach: every optional step that follows
- * it, up to and including the first mandatory one.
+ * Candidate predecessors within a vessel: every optional `vessel`/`both` step
+ * walking backwards, plus the first mandatory one. `slots` steps are
+ * transparent — they neither qualify nor stop the walk.
  */
-function reachableSuccessors(
-  ordered: ArchetypeStep[],
-  from: number,
-): ArchetypeStep[] {
-  const reachable: ArchetypeStep[] = [];
-  for (let j = from + 1; j < ordered.length; j++) {
-    reachable.push(ordered[j]);
-    if (!ordered[j].is_optional) break;
+function predecessorsOf(ordered: ArchetypeStep[], from: number): ArchetypeStep[] {
+  const candidates: ArchetypeStep[] = [];
+  for (let j = from - 1; j >= 0; j--) {
+    const step = ordered[j];
+    if (step.operates_on === "slots") continue;
+    candidates.push(step);
+    if (!step.is_optional) break;
   }
-  return reachable;
+  return candidates;
 }
 
 function producesOf(
@@ -468,6 +630,25 @@ function statesSatisfied(produces: Produces, accepts: Accepts): boolean {
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
 /* -------------------------------------------------------------------------- */
+
+function localRef(archetypeId: string, slug: string): string {
+  return `${archetypeId}::${slug}`;
+}
+
+function byPosition(a: ArchetypeStep, b: ArchetypeStep): number {
+  return a.position - b.position;
+}
+
+function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
+  const groups = new Map<K, T[]>();
+  for (const item of items) {
+    const k = key(item);
+    const existing = groups.get(k);
+    if (existing) existing.push(item);
+    else groups.set(k, [item]);
+  }
+  return groups;
+}
 
 function byId<T extends { id: string }>(records: T[]): Map<string, T> {
   const map = new Map<string, T>();

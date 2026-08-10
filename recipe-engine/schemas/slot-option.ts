@@ -62,9 +62,10 @@ export const slotOptionSchema = z.object({
 
   adds_technique_ids: z.array(techniqueIdSchema).default([]),
   /**
-   * Extra steps this option introduces. SPEC.md declares the column `jsonb`
-   * with no shape and no example, so it is left unvalidated rather than
-   * assumed to be partial `archetype_step` records.
+   * Extra steps this option introduces. Left permissive on purpose (SPEC.md
+   * §5): the first archetype that genuinely needs a slot option to inject a
+   * step defines the shape. Specifying it now, with no use case, produces a
+   * field nobody can use correctly.
    */
   adds_steps: z.array(z.unknown()).optional(),
 

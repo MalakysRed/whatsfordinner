@@ -1,29 +1,24 @@
 import { z } from "zod";
 import {
+  acceptsFilterSchema,
   archetypeIdSchema,
   quantityRuleIdSchema,
   slotCardinalitySchema,
   slotIdSchema,
   slotOptionIdSchema,
+  slotRoleSchema,
   slugSchema,
 } from "./common";
 
 /**
  * `slot` — SPEC.md §5. Where generation gets its variety and the UI its
  * dynamism.
+ *
+ * Note the two identifier forms, which coexist deliberately (SPEC.md design
+ * rule 6): `id` is the permanent `SLOT_` primary key that `slot_option`
+ * references from outside, while `slug` is the archetype-local name that
+ * `consumes_slots` and `condition.slot` use from inside.
  */
-
-/** `text` in SQL, enumerated inline in SPEC.md §5. */
-export const slotRoleSchema = z.enum([
-  "main",
-  "aromatic",
-  "spice",
-  "fat",
-  "acid",
-  "liquid",
-  "garnish",
-  "pantry",
-]);
 
 /** What a fill of this slot changes downstream. */
 export const slotAffectsSchema = z.enum([
@@ -47,12 +42,8 @@ export const slotSchema = z.object({
   cardinality: slotCardinalitySchema,
   is_required: z.boolean().default(true),
 
-  /**
-   * The ontology query defining valid options. SPEC.md declares this `jsonb`
-   * but never gives its shape, so it stays an open object rather than an
-   * invented query language — tighten it once the ontology is specced.
-   */
-  accepts_filter: z.record(z.string(), z.unknown()),
+  /** Tag matching only. See `acceptsFilterSchema`. */
+  accepts_filter: acceptsFilterSchema,
 
   /** Into the constraint layer. Every quantity must trace back to one of these. */
   quantity_rule_id: quantityRuleIdSchema,
@@ -61,7 +52,6 @@ export const slotSchema = z.object({
   affects: z.array(slotAffectsSchema).default([]),
 });
 
-export type SlotRole = z.infer<typeof slotRoleSchema>;
 export type SlotAffects = z.infer<typeof slotAffectsSchema>;
 
 /** Parsed shape — defaults applied. */
