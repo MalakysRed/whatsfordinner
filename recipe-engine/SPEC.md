@@ -14,7 +14,7 @@
 4. **Every option carries its own deltas.** This is what makes the live preview instant and deterministic — no model call in the interaction loop.
 5. **Status field on every authored table.** `draft` records are usable in development, invisible in production.
 6. **Local references use slugs; cross-record references use IDs.** A slot exists only inside its archetype, so `consumes_slots` and `condition.slot` name slot *slugs*, scoped to that archetype. Anything referring to a record that lives elsewhere — `technique_id`, `pattern_id`, `canonical_ingredient_id` — uses the permanent `ID`. `SLOT_` IDs still exist as database primary keys for `slot_option` to reference; both forms coexist deliberately. Renaming a slot slug then breaks references inside one file only, caught immediately by the validator.
-7. **The state vocabulary is a fixed, closed list.** `produces.state` and `accepts.states` draw only from the `ingredient_state` enum in §0. Precise culinary description belongs in `sensory_cues` and `sensory_target`, which humans read and the validator ignores. Over-specific machine states ("translucent but not yet golden") make optional steps unskippable and produce constant false validation failures. A closed enum makes vocabulary drift impossible rather than merely detectable — adding a state requires a deliberate migration, as with `dish_class`.
+7. **The state vocabulary is a fixed, closed list.** `produces.state` and `accepts.states` draw only from the `ingredient_state` enum in §0. Precise culinary description belongs in `sensory_cues` and `sensory_target`, which humans read and the validator ignores. Over-specific machine states ("translucent but not yet golden") make optional steps unskippable and produce constant false validation failures. A closed enum makes vocabulary drift impossible rather than merely detectable — adding a state requires a deliberate migration, as with `method_class`.
 8. **Tags and states are separate namespaces and never mix.** A *tag* is a permanent property of an ingredient (`poultry`, `pulse`, `whole_spice`) and lives on the canonical ingredient. A *state* is a temporary condition at one moment in the sequence (`raw`, `sealed`, `tender`) and is produced by a step. Slot filters describe *which ingredient*; states describe *what has happened to it*. Merging them would require separate ingredient records for raw and cooked chicken.
 
 ---
@@ -76,9 +76,36 @@ CREATE TYPE verification_status AS ENUM (
 
 -- Strict by design. Adding a value should be a deliberate act meaning a
 -- genuinely new structural category, not a dish that did not fit.
-CREATE TYPE dish_class AS ENUM (
-  'braise','stew','roast','traybake','pan_sauce','fry','deep_fry','stir_fry',
-  'soup','bake','pasta','rice','flatbread','pastry','grill','salad','no_cook'
+-- A PROCESS taxonomy: how heat is applied and how food is transformed.
+-- Strict by design. Adding a value is a migration, and should mean a
+-- genuinely new process, not a dish that did not fit.
+--
+-- Deliberately NOT included: principal component (pasta, rice, flatbread,
+-- pastry) and format (traybake, pan_sauce, salad). Those answer different
+-- questions and mixing three axes on one field is what produced the
+-- overlaps in the earlier draft. A lasagne and a pizza are both 'bake';
+-- what separates them is the archetype. One tin is derivable from
+-- vessel_id, not a class.
+CREATE TYPE method_class AS ENUM (
+  -- dry heat
+  'roast',       -- sustained dry oven heat on something already food, largely unattended
+  'bake',        -- assembled or mixed cold, set or transformed by sustained oven heat
+  'grill',       -- direct radiant heat, one surface at a time
+  'fry',         -- shallow fat, active, minutes
+  'deep_fry',    -- submerged in fat held at temperature
+  'stir_fry',    -- very high heat, constant movement, mise en place mandatory
+  -- moist heat
+  'simmer',      -- sustained liquid heat below boiling, long
+  'boil',        -- rolling liquid, usually starch or vegetable, short
+  'steam',       -- indirect moist heat
+  'poach',       -- gentle submerged liquid below simmer, high failure sensitivity
+  -- combination
+  'braise',      -- sear, then liquid, then slow covered cooking (absorbs 'stew')
+  -- biological
+  'ferment',     -- microbial transformation over hours to weeks; near-zero active
+                 -- time, long elapsed time, ambient conditions are the parameter
+  -- none
+  'raw'          -- no heat applied at any point
 );
 
 CREATE TYPE adaptation_type AS ENUM (
@@ -293,7 +320,7 @@ CREATE TABLE archetype (
   display_name        text NOT NULL,
   status              authoring_status NOT NULL DEFAULT 'draft',
 
-  dish_class          dish_class NOT NULL,
+  method_class        method_class NOT NULL,
   cuisine_ids         text[] NOT NULL,
   adaptation_type     adaptation_type NOT NULL,
   region_note         text,
@@ -570,9 +597,9 @@ Note that a poor option is not hidden. It is offered, scored, and honestly annot
 
 ## 6. Worked archetype
 
-`ARCH_CURRY_NORTH_INDIAN` — `short_code: 'NIC'`, `dish_class: 'braise'`. Single vessel throughout.
+`ARCH_CURRY_NORTH_INDIAN` — `short_code: 'NIC'`, `method_class: 'braise'`. Single vessel throughout.
 
-**On the dish class.** There is deliberately no `curry` value. Curry is a dish name, not a structure — hundreds of unrelated things carry it. `dish_class` describes shape, and this shape is *brown things, add liquid, cook slowly*, which is the same skeleton as a British beef and ale stew despite tasting nothing alike. That shared classification is the point: it is what lets the ranker and the effort model treat structurally similar dishes consistently.
+**On the method class.** There is deliberately no `curry` value. Curry is a dish name, not a process — hundreds of unrelated things carry it. `method_class` describes how heat is applied, and this process is *sear, add liquid, cook slowly covered*, which is the same process as a British beef and ale stew and an Italian ragù despite the three tasting nothing alike. That shared classification is the point: it is what lets the ranker, the effort model and the constraint layer treat structurally similar dishes consistently. What separates the three is the archetype — the step sequence — not the class.
 
 | Pos | Technique / Pattern | `operates_on` | Slots consumed | Sensory target | Optional |
 |---|---|---|---|---|---|
