@@ -14,7 +14,8 @@
 4. **Every option carries its own deltas.** This is what makes the live preview instant and deterministic — no model call in the interaction loop.
 5. **Status field on every authored table.** `draft` records are usable in development, invisible in production.
 6. **Local references use slugs; cross-record references use IDs.** A slot exists only inside its archetype, so `consumes_slots` and `condition.slot` name slot *slugs*, scoped to that archetype. Anything referring to a record that lives elsewhere — `technique_id`, `pattern_id`, `canonical_ingredient_id` — uses the permanent `ID`. `SLOT_` IDs still exist as database primary keys for `slot_option` to reference; both forms coexist deliberately. Renaming a slot slug then breaks references inside one file only, caught immediately by the validator.
-7. **Keep the state vocabulary coarse.** `produces` and `accepts` values should number roughly eight to twelve across the whole system — `softened`, `browned`, `reduced`, `sealed`, `tender`, `thickened`, `combined`. Precise culinary description belongs in `sensory_cues` and `sensory_target`, which humans read. Over-specific machine states ("translucent but not yet golden") make optional steps unskippable and produce constant false validation failures.
+7. **The state vocabulary is a fixed, closed list.** `produces.state` and `accepts.states` draw only from the `ingredient_state` enum in §0. Precise culinary description belongs in `sensory_cues` and `sensory_target`, which humans read and the validator ignores. Over-specific machine states ("translucent but not yet golden") make optional steps unskippable and produce constant false validation failures. A closed enum makes vocabulary drift impossible rather than merely detectable — adding a state requires a deliberate migration, as with `dish_class`.
+8. **Tags and states are separate namespaces and never mix.** A *tag* is a permanent property of an ingredient (`poultry`, `pulse`, `whole_spice`) and lives on the canonical ingredient. A *state* is a temporary condition at one moment in the sequence (`raw`, `sealed`, `tender`) and is produced by a step. Slot filters describe *which ingredient*; states describe *what has happened to it*. Merging them would require separate ingredient records for raw and cooked chicken.
 
 ---
 
@@ -49,6 +50,13 @@ CREATE TYPE operates_on AS ENUM (
   'vessel',   -- acts on accumulated pan contents
   'slots',    -- acts only on newly introduced fills
   'both'      -- new fills joined to existing contents
+);
+
+-- Closed by design. See design rule 7. Adding a value is a migration, not
+-- a convenience. Never overlaps with ingredient tags — see design rule 8.
+CREATE TYPE ingredient_state AS ENUM (
+  'raw','softened','browned','sealed','reduced',
+  'thickened','tender','combined','set','rested'
 );
 
 CREATE TYPE verification_status AS ENUM (
@@ -272,6 +280,7 @@ The dish skeleton. Target 40–60 rows. **The highest leverage table in the syst
 CREATE TABLE archetype (
   id                  text PRIMARY KEY,    -- ARCH_CURRY_NORTH_INDIAN
   slug                text UNIQUE NOT NULL,
+  short_code          text UNIQUE NOT NULL CHECK (short_code ~ '^[A-Z]{2,4}$'),
   display_name        text NOT NULL,
   status              authoring_status NOT NULL DEFAULT 'draft',
 
@@ -286,6 +295,10 @@ CREATE TABLE archetype (
   verification_status verification_status NOT NULL DEFAULT 'unverified',
   verified_at         timestamptz,
   verification_note   text,                -- what was wrong the first time it was cooked
+  structure_hash      text NOT NULL,       -- hash of the cooking-relevant fields
+  verified_structure_hash text,            -- structure_hash at time of verification
+  CHECK (verification_status = 'unverified' OR verified_at IS NOT NULL),
+  CHECK (verification_status = 'unverified' OR verified_structure_hash IS NOT NULL),
 
   default_servings    smallint NOT NULL DEFAULT 4,
   scalable            boolean NOT NULL DEFAULT true,
@@ -301,6 +314,22 @@ CREATE TABLE archetype (
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
 ```
+
+### Verification integrity
+
+A verification records that *a specific version* of the archetype was cooked and came out right. Edit the steps afterwards and that record is worthless, so verification must expire when the thing verified changes.
+
+**`structure_hash`** is computed over the cooking-relevant fields only:
+
+- the full ordered step sequence, including `technique_id`, `pattern_id`, `operates_on`, `vessel_id`, `merges_from`, `is_optional`, `condition`, and any overrides
+- every slot's `role`, `cardinality`, `is_required` and `quantity_rule_id`
+- the archetype's `default_servings` and `scaling_limits`
+
+**Deliberately excluded:** `description`, `teaching_summary`, `authoring_notes`, `region_note`, `ui_prompt`, `display_name`, and any `impact_note` or `sensory_target` prose. Correcting a typo in a description must not un-verify a dish cooked last week — if prose edits triggered reversion, the rule would be disabled within a fortnight for being tiresome, which is worse than not having it.
+
+**Automatic reversion.** When `structure_hash` no longer equals `verified_structure_hash`, the archetype reverts to `unverified` and must be cooked again before it can be marked otherwise. This is a validation failure at build time, not a silent flag: the build tells the author what changed and that the archetype now needs re-cooking. Reversion is not overridable — an override would make the distinction meaningless within a month.
+
+`verified_at` and `verified_structure_hash` are both required whenever `verification_status` is not `unverified`. Without the date you cannot tell a current verification from a stale one; without the hash you cannot tell whether it still applies.
 
 ### `base_flavour_axes`
 
@@ -384,7 +413,7 @@ A step with non-empty `merges_from` must be `both`.
 
 ### Step IDs
 
-`STEP_` + archetype short code + slug: `STEP_NIC_BLOOM_WHOLE_SPICE`. **Never position derived.** Steps get reordered constantly during authoring, and position based IDs would break every reference on each reorder.
+`STEP_` + the archetype's `short_code` + slug: `STEP_NIC_BLOOM_WHOLE_SPICE`. The short code is a stored, unique, required field on `archetype` (2–4 uppercase letters), so the validator can confirm every step ID matches its own archetype and that no two archetypes claim the same code. **Never position derived.** Steps get reordered constantly during authoring, and position based IDs would break every reference on each reorder.
 
 ---
 
@@ -445,11 +474,13 @@ Tag matching only. **No query language, no DSL, no parser.** If this proves insu
 ```jsonc
 {
   "any_tags":     ["red_meat","poultry"],   // must carry at least one
-  "all_tags":     ["raw"],                  // optional: must carry all
+  "all_tags":     ["fresh"],                // optional: must carry all
   "exclude_tags": ["cured"],                // optional
   "exclude_ids":  ["ING_00219"]             // optional: specific exceptions
 }
 ```
+
+**Tags only — never states.** Per design rule 8, a filter says *which ingredient*, never *what condition it is in*. `raw`, `sealed` and `tender` are states and must not appear here; condition is determined by where a step sits in the sequence, not by the ingredient. Compatibility checking against a technique's `accepts` therefore compares tags alone, and this is correct rather than a limitation to be fixed later: a filter carries no state information because it cannot meaningfully have any.
 
 Validation for a `slots` or `both` step: every ingredient satisfying the filter must also satisfy the technique's `accepts`. A filter that admits an ingredient the technique cannot take is an authoring error, caught at build time rather than at generation time.
 
@@ -498,7 +529,9 @@ Note that a poor option is not hidden. It is offered, scored, and honestly annot
 
 ## 6. Worked archetype
 
-`ARCH_CURRY_NORTH_INDIAN` — short code `NIC`. Single vessel throughout.
+`ARCH_CURRY_NORTH_INDIAN` — `short_code: 'NIC'`, `dish_class: 'braise'`. Single vessel throughout.
+
+**On the dish class.** There is deliberately no `curry` value. Curry is a dish name, not a structure — hundreds of unrelated things carry it. `dish_class` describes shape, and this shape is *brown things, add liquid, cook slowly*, which is the same skeleton as a British beef and ale stew despite tasting nothing alike. That shared classification is the point: it is what lets the ranker and the effort model treat structurally similar dishes consistently.
 
 | Pos | Technique / Pattern | `operates_on` | Slots consumed | Sensory target | Optional |
 |---|---|---|---|---|---|
@@ -555,7 +588,15 @@ This covers every combination of skips. Checking only `position - 1` would pass 
 
 Both `vessel` and `both` steps are valid predecessors, since each leaves the pan in a new state. Steps with `operates_on` of `slots` or `both` are exempt as *targets* of the check, because they introduce new ingredients rather than transforming what is already there; for those, each consumed slot's `accepts_filter` must instead be compatible with the technique's `accepts`.
 
-Also check: no `cannot_follow` violation; every `merges_from` vessel exists and has at least one prior step; prerequisites satisfied for the user's technique level if level gating is on.
+**`slots` steps are fully transparent to the walk, mandatory or not.** They are skipped over and never stop it. A step that only introduces new fills leaves accumulated vessel contents exactly as the last `vessel` or `both` step left them, so the condition a later step receives was set earlier in the sequence. This holds by definition: a step that *does* alter existing contents while adding new ones must be labelled `both`, not `slots`.
+
+**`cannot_follow` is scoped to `vessel` targets only**, using the same predecessor set. Deliberately narrow. Most real "you cannot do that after this" constraints are about the *condition* of the food, and the `produces` / `accepts` check already covers those with a clearer failure message. Widening `cannot_follow` to all technique adjacency would encode the same constraints twice in two mechanisms that can disagree. Reserve it for constraints that are genuinely not about condition; if an archetype needs something the narrow form cannot express, that is the evidence for widening it.
+
+Also check: every `merges_from` vessel exists and has at least one prior step; **no step lists its own `vessel_id` in `merges_from`** (an authoring error that currently passes, since the vessel trivially exists); prerequisites satisfied for the user's technique level if level gating is on.
+
+**Verification checks:** `verified_at` and `verified_structure_hash` are present whenever `verification_status` is not `unverified`; and `structure_hash` equals `verified_structure_hash`, failing the build with a reversion notice when it does not. See §3.
+
+**Identity checks:** every `short_code` is unique across archetypes; every step ID matches `STEP_<own archetype's short_code>_<slug>`.
 
 **Known limitation, recorded rather than fixed:** the walk treats all skip combinations as reachable, but `condition` values can make some mutually exclusive. It will therefore occasionally flag a combination that cannot actually occur. This is left deliberately — a false positive is visible and irritating, a false negative is invisible and ends up in a user's pan. If a real archetype throws a spurious failure, that is the trigger to make the walk condition aware.
 
