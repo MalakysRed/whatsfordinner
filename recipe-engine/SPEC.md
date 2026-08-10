@@ -59,6 +59,9 @@ CREATE TYPE ingredient_state AS ENUM (
   'thickened','tender','combined','set','rested'
 );
 
+-- DERIVED, never authored or stored. Computed by comparing
+-- verified_structure_hash against the freshly computed structure_hash.
+-- See §3 Verification integrity.
 CREATE TYPE verification_status AS ENUM (
   'unverified',           -- authored from research, never cooked
   'author_verified',      -- cooked by the author, result was right
@@ -292,13 +295,12 @@ CREATE TABLE archetype (
   description         text NOT NULL,       -- authored, shown before slot filling
   teaching_summary    text,                -- what the user learns by cooking this
 
-  verification_status verification_status NOT NULL DEFAULT 'unverified',
+  -- Verification. See below: what is authored here is the FACT of cooking
+  -- it, not a status. verification_status is DERIVED, never authored.
   verified_at         timestamptz,
-  verification_note   text,                -- what was wrong the first time it was cooked
-  structure_hash      text NOT NULL,       -- hash of the cooking-relevant fields
   verified_structure_hash text,            -- structure_hash at time of verification
-  CHECK (verification_status = 'unverified' OR verified_at IS NOT NULL),
-  CHECK (verification_status = 'unverified' OR verified_structure_hash IS NOT NULL),
+  verification_note   text,                -- what was wrong when it was cooked
+  CHECK ((verified_at IS NULL) = (verified_structure_hash IS NULL)),
 
   default_servings    smallint NOT NULL DEFAULT 4,
   scalable            boolean NOT NULL DEFAULT true,
@@ -317,19 +319,35 @@ CREATE TABLE archetype (
 
 ### Verification integrity
 
-A verification records that *a specific version* of the archetype was cooked and came out right. Edit the steps afterwards and that record is worthless, so verification must expire when the thing verified changes.
+A verification records that *a specific version* of the archetype was cooked and came out right. Edit the structure afterwards and that record no longer applies.
 
-**`structure_hash`** is computed over the cooking-relevant fields only:
+**What is authored is the fact, not the status.** The author records three things: `verified_at` (when it was cooked), `verified_structure_hash` (what the structure was at that moment), and `verification_note` (what was wrong). Nothing else.
 
-- the full ordered step sequence, including `technique_id`, `pattern_id`, `operates_on`, `vessel_id`, `merges_from`, `is_optional`, `condition`, and any overrides
+**`verification_status` is derived, never stored or authored:**
+
+| Condition | Derived status |
+|---|---|
+| `verified_structure_hash` is null | `unverified` |
+| equals the computed `structure_hash` | `author_verified` |
+| differs from the computed `structure_hash` | `unverified` |
+
+Reversion is therefore not enforced — it simply *is*. The derived value changes the instant the structure does, and there is nothing to override because there is no stored field to overwrite. This keeps the validator to rejection-not-correction: it never mutates authored data.
+
+**`structure_hash` is computed, never stored on the record.** It is derivable from the record at any moment, so storing it would violate design rule 3 and create a staleness problem that exists only because of the redundancy. Compute it during validation and at build time. The SQL column is populated by the build, not by the author.
+
+`verified_structure_hash` is different and *is* stored: it records what the structure was at a past moment, which cannot be recomputed from the current record. That is the dividing line — authored data holds facts only the author knows; a hash of the current record is derived, a hash captured last September is history.
+
+**Hashed — the cooking-relevant fields:**
+
+- the full ordered step sequence: `technique_id`, `pattern_id`, `operates_on`, `vessel_id`, `merges_from`, `consumes_slots`, `is_optional`, `condition`, and any overrides
 - every slot's `role`, `cardinality`, `is_required` and `quantity_rule_id`
 - the archetype's `default_servings` and `scaling_limits`
 
-**Deliberately excluded:** `description`, `teaching_summary`, `authoring_notes`, `region_note`, `ui_prompt`, `display_name`, and any `impact_note` or `sensory_target` prose. Correcting a typo in a description must not un-verify a dish cooked last week — if prose edits triggered reversion, the rule would be disabled within a fortnight for being tiresome, which is worse than not having it.
+**Deliberately excluded:** `description`, `teaching_summary`, `authoring_notes`, `region_note`, `ui_prompt`, `display_name`, and any `impact_note` or `sensory_target` prose. Correcting a typo must not un-verify a dish cooked last week — if prose edits triggered reversion, the rule would be switched off within a fortnight for being tiresome, which is worse than not having it. **Do not widen this list.**
 
-**Automatic reversion.** When `structure_hash` no longer equals `verified_structure_hash`, the archetype reverts to `unverified` and must be cooked again before it can be marked otherwise. This is a validation failure at build time, not a silent flag: the build tells the author what changed and that the archetype now needs re-cooking. Reversion is not overridable — an override would make the distinction meaningless within a month.
+**Also excluded, on a considered decision: `slot.accepts_filter`.** A verification attests that the *skeleton* is sound, not that every slot combination works — it never could, since nine slots with six options each is tens of thousands of permutations and exactly one was cooked. Widening a filter from poultry to poultry and red meat leaves the skeleton unchanged and the cooked version still correct. Slot *structure* is hashed because it changes the skeleton; the option list is not. The real risk here — a poorly suited option being added — belongs to `suitability`, `impact_note` and the cook log.
 
-`verified_at` and `verified_structure_hash` are both required whenever `verification_status` is not `unverified`. Without the date you cannot tell a current verification from a stale one; without the hash you cannot tell whether it still applies.
+**Reporting, not failing.** A reverted archetype is reported at build time (`2 archetypes reverted to unverified since last build`), not raised as an error. Editing an archetype is legitimate work, and failing the build for an expected consequence of legitimate work is the kind of rule that gets disabled.
 
 ### `base_flavour_axes`
 
@@ -367,6 +385,7 @@ Ordered operation sequence.
 CREATE TABLE archetype_step (
   id                text PRIMARY KEY,      -- STEP_<ARCHCODE>_<SLUG>
   archetype_id      text NOT NULL REFERENCES archetype(id) ON DELETE CASCADE,
+  slug              text NOT NULL,         -- bloom_whole_spice; unique within archetype
   position          smallint NOT NULL,
 
   technique_id      text REFERENCES technique(id),
@@ -413,7 +432,7 @@ A step with non-empty `merges_from` must be `both`.
 
 ### Step IDs
 
-`STEP_` + the archetype's `short_code` + slug: `STEP_NIC_BLOOM_WHOLE_SPICE`. The short code is a stored, unique, required field on `archetype` (2–4 uppercase letters), so the validator can confirm every step ID matches its own archetype and that no two archetypes claim the same code. **Never position derived.** Steps get reordered constantly during authoring, and position based IDs would break every reference on each reorder.
+`STEP_` + the archetype's `short_code` + the step's `slug`: `STEP_NIC_BLOOM_WHOLE_SPICE`. Both components are stored fields — `short_code` on `archetype` (2–4 uppercase letters, unique) and `slug` on `archetype_step` (unique within its archetype) — so the ID is fully verifiable rather than only prefix checked. **Never position derived.** Steps get reordered constantly during authoring, and position based IDs would break every reference on each reorder.
 
 ---
 
@@ -594,9 +613,9 @@ Both `vessel` and `both` steps are valid predecessors, since each leaves the pan
 
 Also check: every `merges_from` vessel exists and has at least one prior step; **no step lists its own `vessel_id` in `merges_from`** (an authoring error that currently passes, since the vessel trivially exists); prerequisites satisfied for the user's technique level if level gating is on.
 
-**Verification checks:** `verified_at` and `verified_structure_hash` are present whenever `verification_status` is not `unverified`; and `structure_hash` equals `verified_structure_hash`, failing the build with a reversion notice when it does not. See §3.
+**Verification checks:** `verified_at` and `verified_structure_hash` are both present or both absent. `verification_status` is **derived, never validated as authored input** — it is computed by comparing `verified_structure_hash` against the freshly computed `structure_hash`. Reverted archetypes are counted and reported at build time, not raised as errors. See §3.
 
-**Identity checks:** every `short_code` is unique across archetypes; every step ID matches `STEP_<own archetype's short_code>_<slug>`.
+**Identity checks:** every `short_code` is unique across archetypes; every step `slug` is unique within its archetype; every step ID equals `STEP_` + its own archetype's `short_code` + its own `slug`.
 
 **Known limitation, recorded rather than fixed:** the walk treats all skip combinations as reachable, but `condition` values can make some mutually exclusive. It will therefore occasionally flag a combination that cannot actually occur. This is left deliberately — a false positive is visible and irritating, a false negative is invisible and ends up in a user's pan. If a real archetype throws a spurious failure, that is the trigger to make the walk condition aware.
 
