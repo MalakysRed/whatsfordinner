@@ -4,6 +4,7 @@ import {
   acceptsFilterSchema,
   archetypeSchema,
   archetypeStepSchema,
+  methodClassSchema,
   slotOptionSchema,
   slotSchema,
   techniqueSchema,
@@ -90,7 +91,7 @@ function archetype(overrides: Partial<ArchetypeInput> = {}): Archetype {
     slug: "fixture",
     short_code: "FIX",
     display_name: "Fixture archetype",
-    dish_class: "stew",
+    method_class: "braise",
     cuisine_ids: ["fixture_cuisine"],
     adaptation_type: "traditional",
     description: "Structural fixture.",
@@ -348,16 +349,67 @@ describe("schemas", () => {
     );
   });
 
-  it("uses the strict dish_class vocabulary from SPEC §0", () => {
-    expect(
-      archetypeSchema.safeParse({ ...archetype(), dish_class: "traybake" }).success,
-    ).toBe(true);
-    // 'curry' is deliberately absent — a curry is dish_class 'braise', sharing
-    // its shape with a beef and ale stew. Curry is a name, not a structure.
-    expect(archetypeSchema.safeParse({ ...archetype(), dish_class: "curry" }).success).toBe(
-      false,
+  it("uses the method_class process vocabulary from SPEC §0", () => {
+    const PROCESSES = [
+      "roast",
+      "bake",
+      "grill",
+      "fry",
+      "deep_fry",
+      "stir_fry",
+      "simmer",
+      "boil",
+      "steam",
+      "poach",
+      "braise",
+      "ferment",
+      "raw",
+    ];
+
+    for (const value of PROCESSES) {
+      expect(
+        archetypeSchema.safeParse({ ...archetype(), method_class: value }).success,
+        value,
+      ).toBe(true);
+    }
+    expect(methodClassSchema.options).toEqual(PROCESSES);
+  });
+
+  it("rejects the taxonomies method_class deliberately excludes", () => {
+    // Principal component, not process.
+    for (const value of ["pasta", "rice", "flatbread", "pastry"]) {
+      expect(
+        archetypeSchema.safeParse({ ...archetype(), method_class: value }).success,
+        value,
+      ).toBe(false);
+    }
+    // Format, not process. "One tin" is derivable from vessel_id.
+    for (const value of ["traybake", "pan_sauce", "salad"]) {
+      expect(
+        archetypeSchema.safeParse({ ...archetype(), method_class: value }).success,
+        value,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects the values that were merged or renamed away", () => {
+    // 'stew' merged into 'braise'; 'soup' became 'simmer'; 'no_cook' became
+    // 'raw'; 'curry' was never a process to begin with.
+    for (const value of ["stew", "soup", "no_cook", "curry"]) {
+      expect(
+        archetypeSchema.safeParse({ ...archetype(), method_class: value }).success,
+        value,
+      ).toBe(false);
+    }
+  });
+
+  it("keeps bake and roast distinct", () => {
+    // Roast applies heat to something already food; bake transforms a batter,
+    // dough or cold assembly. Different attention profiles and failure modes.
+    expect(archetypeSchema.safeParse({ ...archetype(), method_class: "roast" }).success).toBe(
+      true,
     );
-    expect(archetypeSchema.safeParse({ ...archetype(), dish_class: "braise" }).success).toBe(
+    expect(archetypeSchema.safeParse({ ...archetype(), method_class: "bake" }).success).toBe(
       true,
     );
   });

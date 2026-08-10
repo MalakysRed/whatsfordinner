@@ -192,27 +192,60 @@ export const verificationStatusSchema = z.enum([
 ]);
 
 /**
- * Strict by design (SPEC.md §0): adding a value should mean a genuinely new
- * structural category, not a dish that did not fit.
+ * A **process** taxonomy: how heat is applied and how food is transformed
+ * (SPEC.md §0). Strict by design — adding a value is a migration, and should
+ * mean a genuinely new process, not a dish that did not fit.
+ *
+ * Deliberately *not* included: principal component (pasta, rice, flatbread,
+ * pastry) and format (traybake, pan_sauce, salad). Those answer different
+ * questions, and mixing three axes on one field is what produced the overlaps
+ * in the earlier draft. Everything the field actually drives — effort
+ * defaults, oven temperatures, seasoning rates, ranker grouping — keys off
+ * process. A lasagne and a pizza are both `bake`; what separates them is the
+ * archetype. "One tin" is derivable from `vessel_id`, not asserted as a class.
  */
-export const dishClassSchema = z.enum([
-  "braise",
-  "stew",
+export const methodClassSchema = z.enum([
+  // Dry heat
+  /** Sustained dry oven heat on something already food, largely unattended. */
   "roast",
-  "traybake",
-  "pan_sauce",
-  "fry",
-  "deep_fry",
-  "stir_fry",
-  "soup",
+  /** Assembled or mixed cold, set or transformed by sustained oven heat. */
   "bake",
-  "pasta",
-  "rice",
-  "flatbread",
-  "pastry",
+  /** Direct radiant heat, one surface at a time. */
   "grill",
-  "salad",
-  "no_cook",
+  /** Shallow fat, active, minutes. */
+  "fry",
+  /** Submerged in fat held at temperature. */
+  "deep_fry",
+  /** Very high heat, constant movement, mise en place mandatory. */
+  "stir_fry",
+
+  // Moist heat
+  /** Sustained liquid heat below boiling, long. Absorbs the old `soup`. */
+  "simmer",
+  /** Rolling liquid, usually starch or vegetable, short. */
+  "boil",
+  /** Indirect moist heat. */
+  "steam",
+  /** Gentle submerged liquid below simmer, high failure sensitivity. */
+  "poach",
+
+  // Combination
+  /** Sear, then liquid, then slow covered cooking. Absorbs the old `stew`. */
+  "braise",
+
+  // Biological
+  /**
+   * Microbial transformation over hours to weeks. Near-zero active time, long
+   * elapsed time, and ambient conditions rather than applied heat are the
+   * governing parameter — so it does not fit the `duration_model` assumptions
+   * the thermal processes share. No ferment archetype exists yet; the timing
+   * model gets revisited when one does.
+   */
+  "ferment",
+
+  // None
+  /** No heat applied at any point. Replaces the old `no_cook`. */
+  "raw",
 ]);
 
 export const adaptationTypeSchema = z.enum([
@@ -421,7 +454,7 @@ export type SlotCardinality = z.infer<typeof slotCardinalitySchema>;
 export type OperatesOn = z.infer<typeof operatesOnSchema>;
 export type IngredientState = z.infer<typeof ingredientStateSchema>;
 export type VerificationStatus = z.infer<typeof verificationStatusSchema>;
-export type DishClass = z.infer<typeof dishClassSchema>;
+export type MethodClass = z.infer<typeof methodClassSchema>;
 export type AdaptationType = z.infer<typeof adaptationTypeSchema>;
 export type SlotRole = z.infer<typeof slotRoleSchema>;
 export type FlavourAxis = (typeof FLAVOUR_AXES)[number];

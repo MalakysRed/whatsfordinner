@@ -3,8 +3,8 @@ import {
   adaptationTypeSchema,
   archetypeIdSchema,
   authoringStatusSchema,
-  dishClassSchema,
   flavourAxesSchema,
+  methodClassSchema,
   shortCodeSchema,
   slugSchema,
 } from "./common";
@@ -14,7 +14,7 @@ import {
  * in the system: nine slots with a realistic option list generate thousands of
  * coherent dishes from one authored row.
  *
- * `dish_class` and `adaptation_type` are shared enums from SPEC.md §0, so they
+ * `method_class` and `adaptation_type` are shared enums from SPEC.md §0, so they
  * live in `common.ts` and are imported here rather than re-exported —
  * re-exporting would make them ambiguous under the barrel's `export *`.
  *
@@ -56,7 +56,7 @@ export const archetypeSchema = z
     display_name: z.string().min(1),
     status: authoringStatusSchema.default("draft"),
 
-    dish_class: dishClassSchema,
+    method_class: methodClassSchema,
     cuisine_ids: z.array(z.string()).min(1),
     adaptation_type: adaptationTypeSchema,
     region_note: z.string().optional(),
