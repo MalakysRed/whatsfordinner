@@ -74,11 +74,14 @@ CREATE TYPE verification_status AS ENUM (
   'author_verified'       -- cooked by the author against the current structure
 );
 
--- Strict by design. Adding a value should be a deliberate act meaning a
--- genuinely new structural category, not a dish that did not fit.
 -- A PROCESS taxonomy: how heat is applied and how food is transformed.
 -- Strict by design. Adding a value is a migration, and should mean a
 -- genuinely new process, not a dish that did not fit.
+--
+-- method_class describes the GOVERNING process of the archetype, not a
+-- guarantee about every step. A 'raw' salad may toast its nuts; a 'braise'
+-- may finish with a raw herb. Do not validate every step's heat against
+-- the class — it would produce false failures on legitimate archetypes.
 --
 -- Deliberately NOT included: principal component (pasta, rice, flatbread,
 -- pastry) and format (traybake, pan_sauce, salad). Those answer different
@@ -337,6 +340,8 @@ CREATE TABLE archetype (
   CHECK (verification_note IS NULL OR verified_at IS NOT NULL),
 
   default_servings    smallint NOT NULL DEFAULT 4,
+  requires_advance_days smallint NOT NULL DEFAULT 0,
+  CHECK (method_class <> 'ferment' OR requires_advance_days > 0),
   scalable            boolean NOT NULL DEFAULT true,
   scaling_limits      jsonb,               -- {"min":1,"max":8,"note":"pan capacity"}
 
@@ -350,6 +355,14 @@ CREATE TABLE archetype (
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
 ```
+
+### `requires_advance_days`
+
+Whole days the dish must be started ahead — fermentation, curing, soaking dried pulses, an overnight prove or marinade. Zero for most archetypes.
+
+**Needed independently of `ferment`.** The time budget entry point (§3 `entry_affinities`) has to be able to exclude anything that cannot be finished tonight, and elapsed step durations do not express "start this on Thursday". Without it, the ranker would happily offer kimchi to someone deciding what to have for dinner.
+
+**Required to be non-zero for `method_class: 'ferment'`.** This is the guard against a ferment archetype being authored with a `duration_model` that quietly misrepresents it. It does not fix the underlying mismatch — fermentation barely scales with mass, runs for days, and is governed by ambient temperature rather than applied heat, none of which `duration_model` expresses — but it does mean the elapsed time cannot silently read as forty minutes. **When the first ferment archetype is authored, the timing model gets revisited properly.** That archetype is the trigger.
 
 ### Verification integrity
 
