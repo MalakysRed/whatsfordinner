@@ -340,10 +340,11 @@ CREATE TABLE archetype (
   CHECK (verification_note IS NULL OR verified_at IS NOT NULL),
 
   default_servings    smallint NOT NULL DEFAULT 4,
-  requires_advance_days smallint NOT NULL DEFAULT 0,
-  CHECK (method_class <> 'ferment' OR requires_advance_days > 0),
   scalable            boolean NOT NULL DEFAULT true,
   scaling_limits      jsonb,               -- {"min":1,"max":8,"note":"pan capacity"}
+
+  requires_advance_days smallint NOT NULL DEFAULT 0 CHECK (requires_advance_days >= 0),
+  CHECK (method_class <> 'ferment' OR requires_advance_days > 0),
 
   base_flavour_axes   jsonb NOT NULL,      -- before slot fills modify them
   required_equipment  text[] NOT NULL DEFAULT '{}',
