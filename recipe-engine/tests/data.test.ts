@@ -368,7 +368,12 @@ describe("schemas", () => {
 
     for (const value of PROCESSES) {
       expect(
-        archetypeSchema.safeParse({ ...archetype(), method_class: value }).success,
+        archetypeSchema.safeParse({
+          ...archetype(),
+          method_class: value,
+          // A ferment must declare lead time; every other process may be zero.
+          requires_advance_days: value === "ferment" ? 3 : 0,
+        }).success,
         value,
       ).toBe(true);
     }
@@ -412,6 +417,52 @@ describe("schemas", () => {
     expect(archetypeSchema.safeParse({ ...archetype(), method_class: "bake" }).success).toBe(
       true,
     );
+  });
+
+  it("defaults requires_advance_days to zero", () => {
+    expect(archetype().requires_advance_days).toBe(0);
+  });
+
+  it("rejects a negative requires_advance_days", () => {
+    expect(
+      archetypeSchema.safeParse({ ...archetype(), requires_advance_days: -1 }).success,
+    ).toBe(false);
+  });
+
+  it("requires a ferment to declare lead time", () => {
+    // A ferment claiming no lead time would rank as a weeknight dinner.
+    expect(
+      archetypeSchema.safeParse({ ...archetype(), method_class: "ferment" }).success,
+    ).toBe(false);
+    expect(
+      archetypeSchema.safeParse({
+        ...archetype(),
+        method_class: "ferment",
+        requires_advance_days: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      archetypeSchema.safeParse({
+        ...archetype(),
+        method_class: "ferment",
+        requires_advance_days: 3,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("allows lead time on any method_class, not just ferment", () => {
+    // The field exists for time-budget ranking generally — an overnight
+    // marinade or a soak is lead time on a braise.
+    expect(
+      archetypeSchema.safeParse({
+        ...archetype(),
+        method_class: "braise",
+        requires_advance_days: 1,
+      }).success,
+    ).toBe(true);
+    expect(
+      archetypeSchema.safeParse({ ...archetype(), method_class: "braise" }).success,
+    ).toBe(true);
   });
 
   it("accepts the added adaptation_type and slot_role values", () => {

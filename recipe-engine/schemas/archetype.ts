@@ -89,6 +89,21 @@ export const archetypeSchema = z
     scalable: z.boolean().default(true),
     scaling_limits: scalingLimitsSchema.optional(),
 
+    /**
+     * Days of lead time before the cook itself — a soak, a cure, a prove, a
+     * ferment. Needed for time-budget ranking regardless of `method_class`:
+     * elapsed step durations cannot express "start this on Thursday", so a
+     * dish that needs a day's notice is otherwise indistinguishable from one
+     * that does not.
+     *
+     * A `ferment` archetype must declare at least one day (see the refinement
+     * below). That is a *partial* guard only: it does not fix `duration_model`,
+     * which still assumes mass scaling and applied heat — neither of which
+     * governs a ferment. The first ferment archetype is the trigger for
+     * revisiting the timing model properly.
+     */
+    requires_advance_days: z.number().int().min(0).default(0),
+
     /** Before slot fills apply their deltas. */
     base_flavour_axes: flavourAxesSchema,
     required_equipment: z.array(z.string()).default([]),
@@ -119,6 +134,17 @@ export const archetypeSchema = z
       message:
         "verification_note requires verified_at — use authoring_notes for an uncooked archetype",
       path: ["verification_note"],
+    },
+  )
+  // CHECK (method_class <> 'ferment' OR requires_advance_days > 0)
+  // A ferment runs for hours to weeks; one that claims to need no lead time is
+  // mis-declared, and would rank as a weeknight dinner.
+  .refine(
+    (a) => a.method_class !== "ferment" || a.requires_advance_days > 0,
+    {
+      message:
+        "a ferment archetype must declare requires_advance_days greater than 0",
+      path: ["requires_advance_days"],
     },
   );
 
